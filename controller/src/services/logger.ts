@@ -7,7 +7,65 @@ export interface LogContext {
   [key: string]: any;
 }
 
-export class Logger {
+// Logger Service Interface
+export interface Logger {
+  info(message: string, context?: Partial<LogContext>): void;
+  warn(message: string, context?: Partial<LogContext>): void;
+  error(
+    message: string,
+    error?: Error | any,
+    context?: Partial<LogContext>
+  ): void;
+  debug(message: string, context?: Partial<LogContext>): void;
+  fatal(
+    message: string,
+    error?: Error | any,
+    context?: Partial<LogContext>
+  ): void;
+  child(additionalContext: Partial<LogContext>): Logger;
+
+  // Specialized logging methods
+  agentConnected(
+    agentId: string,
+    agentName: string,
+    capabilities: string[]
+  ): void;
+  agentDisconnected(agentId: string, reason?: string): void;
+  agentError(
+    agentId: string,
+    error: Error,
+    context?: Partial<LogContext>
+  ): void;
+  requestReceived(
+    requestId: string,
+    type: string,
+    model: string,
+    context?: Partial<LogContext>
+  ): void;
+  requestCompleted(
+    requestId: string,
+    duration: number,
+    context?: Partial<LogContext>
+  ): void;
+  requestFailed(
+    requestId: string,
+    error: Error,
+    context?: Partial<LogContext>
+  ): void;
+  agentSelected(agentId: string, requestId: string, reason: string): void;
+  noAvailableAgents(requestId: string): void;
+  modelMappingCreated(internalName: string, publicName: string): void;
+  modelDownloadStarted(
+    agentId: string,
+    modelUrl: string,
+    filename: string
+  ): void;
+  modelDownloadCompleted(agentId: string, filename: string): void;
+  modelDownloadFailed(agentId: string, modelUrl: string, error: Error): void;
+}
+
+// Pico Logger Implementation
+export class PinoLogger implements Logger {
   private logger: pino.Logger;
   private context: LogContext;
 
@@ -97,7 +155,7 @@ export class Logger {
 
   // Create a child logger with additional context
   child(additionalContext: Partial<LogContext>): Logger {
-    return new Logger({
+    return new PinoLogger({
       level: this.logger.level,
       context: this.enrichContext(additionalContext),
     });
@@ -235,7 +293,7 @@ export class Logger {
 }
 
 // Global logger instance
-export const logger = new Logger();
+export const logger = new PinoLogger();
 
 // Request-scoped logger factory
 export function createRequestLogger(requestId: string): Logger {

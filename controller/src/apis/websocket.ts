@@ -1,5 +1,5 @@
-import { DatabaseService } from "../services/db.js";
-import { logger, createAgentLogger } from "../services/logger.js";
+import type { Db } from "../services/db";
+import type { Logger } from "../services/logger";
 
 export interface AgentInfo {
   id: string;
@@ -8,12 +8,24 @@ export interface AgentInfo {
   connectedAt: number;
 }
 
-export class WebSocketHandler {
-  private db: DatabaseService;
+// WebSocket Handler Interface
+export interface WebSocketHandler {
+  getAgentAPI(): any;
+  getConnectedAgents(): AgentInfo[];
+  isAgentConnected(agentId: string): boolean;
+  getAgent(agentId: string): AgentInfo | undefined;
+  shutdown(): void;
+}
+
+// WebSocket Handler Implementation
+export class KkrpcWebSocketHandler implements WebSocketHandler {
+  private db: Db;
+  private logger: Logger;
   private connectedAgents: Map<string, AgentInfo> = new Map();
 
-  constructor(db: DatabaseService) {
+  constructor(db: Db, logger: Logger) {
     this.db = db;
+    this.logger = logger;
   }
 
   public getAgentAPI() {
@@ -52,7 +64,7 @@ export class WebSocketHandler {
     const agentName = req.headers.get("agent-name");
 
     if (!agentId || !agentName) {
-      logger.warn("Agent connection rejected: missing headers", {
+      this.logger.warn("Agent connection rejected: missing headers", {
         hasAgentId: !!agentId,
         hasAgentName: !!agentName,
       });
@@ -62,7 +74,7 @@ export class WebSocketHandler {
 
     // Check for duplicate agent ID
     if (this.connectedAgents.has(agentId)) {
-      logger.warn("Agent connection rejected: duplicate agent ID", {
+      this.logger.warn("Agent connection rejected: duplicate agent ID", {
         agentId,
         agentName,
       });
@@ -84,10 +96,9 @@ export class WebSocketHandler {
     this.db.registerAgent(agentId, agentName, []);
 
     // Log connection
-    const agentLogger = createAgentLogger(agentId);
-    agentLogger.agentConnected(agentId, agentName, []);
+    this.logger.agentConnected(agentId, agentName, []);
 
-    logger.info("Agent connected", {
+    this.logger.info("Agent connected", {
       agentId,
       agentName,
       totalAgents: this.connectedAgents.size,
@@ -101,10 +112,9 @@ export class WebSocketHandler {
     this.connectedAgents.delete(agentId);
     this.db.updateAgentStatus(agentId, "disconnected");
 
-    const agentLogger = createAgentLogger(agentId);
-    agentLogger.agentDisconnected(agentId, reason || `Code: ${code}`);
+    this.logger.agentDisconnected(agentId, reason || `Code: ${code}`);
 
-    logger.info("Agent disconnected", {
+    this.logger.info("Agent disconnected", {
       agentId,
       code,
       reason,
@@ -115,66 +125,65 @@ export class WebSocketHandler {
   private handleError(ws: any, error: Error): void {
     const agentId = ws.agentId;
     if (agentId) {
-      const agentLogger = createAgentLogger(agentId);
-      agentLogger.agentError(agentId, error);
+      this.logger.agentError(agentId, error);
     } else {
-      logger.error("WebSocket error from unknown connection", error);
+      this.logger.error("WebSocket error from unknown connection", error);
     }
   }
 
   // Controller -> Agent procedures
   private async handleCompletion(params: any): Promise<any> {
-    logger.info("Completion request", params);
+    this.logger.info("Completion request", params);
     // TODO: Implement completion logic
     return { result: "completion_result" };
   }
 
   private async handleChat(params: any): Promise<any> {
-    logger.info("Chat request", params);
+    this.logger.info("Chat request", params);
     // TODO: Implement chat logic
     return { result: "chat_result" };
   }
 
   private async handleListModels(): Promise<any> {
-    logger.info("List models request");
+    this.logger.info("List models request");
     // TODO: Implement list models logic
     return { models: [] };
   }
 
   private async handleCurrentModels(): Promise<any> {
-    logger.info("Current models request");
+    this.logger.info("Current models request");
     // TODO: Implement current models logic
     return { models: [] };
   }
 
   private async handleStartModel(params: any): Promise<any> {
-    logger.info("Start model request", params);
+    this.logger.info("Start model request", params);
     // TODO: Implement start model logic
     return { models: [] };
   }
 
   private async handleDownloadModel(params: any): Promise<any> {
-    logger.info("Download model request", params);
+    this.logger.info("Download model request", params);
     // TODO: Implement download model logic
     return { filename: "downloaded_model.gguf" };
   }
 
   private async handleStatus(): Promise<any> {
-    logger.info("Status request");
+    this.logger.info("Status request");
     // TODO: Implement status logic
     return { status: "ready" };
   }
 
   // Agent -> Controller procedures
   private handleAgentError(params: any): void {
-    logger.error("Agent error", new Error(params.error), {
+    this.logger.error("Agent error", new Error(params.error), {
       agentId: params.agentId,
       context: params.context,
     });
   }
 
   private handleReceiveCompletion(params: any): void {
-    logger.debug("Received completion stream", {
+    this.logger.debug("Received completion stream", {
       agentId: params.agentId,
       requestId: params.requestId,
       hasData: !!params.data,
@@ -196,7 +205,7 @@ export class WebSocketHandler {
   }
 
   public shutdown(): void {
-    logger.info("Shutting down WebSocket handler", {
+    this.logger.info("Shutting down WebSocket handler", {
       connectedAgents: this.connectedAgents.size,
     });
     this.connectedAgents.clear();

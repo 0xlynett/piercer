@@ -3,12 +3,23 @@ import { cors } from "hono/cors";
 import { logger as honoLogger } from "hono/logger";
 import { upgradeWebSocket, websocket } from "hono/bun";
 import { createHonoWebSocketHandler } from "kkrpc";
-import { DatabaseService } from "./services/db.js";
-import { logger } from "./services/logger.js";
-import { WebSocketHandler } from "./apis/websocket.js";
+import { BunDatabase } from "./services/db";
+import type { Db } from "./services/db";
+import { PinoLogger } from "./services/logger";
+import type { Logger } from "./services/logger";
+import { KkrpcWebSocketHandler } from "./apis/websocket";
+import type { WebSocketHandler } from "./apis/websocket";
 
 // Environment configuration
-const config = {
+interface AppConfig {
+  port: number;
+  host: string;
+  databasePath: string;
+  corsOrigin: string;
+  logLevel: string;
+}
+
+const config: AppConfig = {
   port: parseInt(process.env.PORT || "4080", 10),
   host: process.env.HOST || "0.0.0.0",
   databasePath: process.env.DATABASE_PATH || "./piercer.db",
@@ -16,11 +27,43 @@ const config = {
   logLevel: process.env.LOG_LEVEL || "info",
 };
 
-// Initialize database
-const db = new DatabaseService(config.databasePath);
+// Dependency Injection Container
+class DIContainer {
+  private db: Db;
+  private logger: Logger;
+  private wsHandler: WebSocketHandler;
 
-// Initialize WebSocket handler
-const wsHandler = new WebSocketHandler(db);
+  constructor(config: AppConfig) {
+    // Initialize logger first (needed by other services)
+    this.logger = new PinoLogger({ level: config.logLevel });
+
+    // Initialize database
+    this.db = new BunDatabase(config.databasePath);
+
+    // Initialize WebSocket handler with dependencies
+    this.wsHandler = new KkrpcWebSocketHandler(this.db, this.logger);
+  }
+
+  getDb(): Db {
+    return this.db;
+  }
+
+  getLogger(): Logger {
+    return this.logger;
+  }
+
+  getWebSocketHandler(): WebSocketHandler {
+    return this.wsHandler;
+  }
+
+  async shutdown(): Promise<void> {
+    this.wsHandler.shutdown();
+    this.db.close();
+  }
+}
+
+// Initialize dependency injection container
+const container = new DIContainer(config);
 
 // Create Hono app
 const app = new Hono();
@@ -39,7 +82,7 @@ app.use(
 // Logging middleware
 app.use(
   honoLogger((message) => {
-    logger.info(message);
+    container.getLogger().info(message);
   })
 );
 
@@ -49,7 +92,8 @@ app.get("/health", (c) => {
     status: "healthy",
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    connectedAgents: wsHandler.getConnectedAgents().length,
+    connectedAgents: container.getWebSocketHandler().getConnectedAgents()
+      .length,
   });
 });
 
@@ -58,7 +102,7 @@ app.get(
   "/ws",
   upgradeWebSocket(() => {
     return createHonoWebSocketHandler({
-      expose: wsHandler.getAgentAPI(),
+      expose: container.getWebSocketHandler().getAgentAPI(),
     });
   })
 );
@@ -74,13 +118,14 @@ app.get("/api/info", (c) => {
       health: "/health",
       api: "/api/info",
     },
-    connectedAgents: wsHandler.getConnectedAgents().length,
+    connectedAgents: container.getWebSocketHandler().getConnectedAgents()
+      .length,
   });
 });
 
 // Error handling middleware
 app.onError((err, c) => {
-  logger.error("Request error", err, {
+  container.getLogger().error("Request error", err, {
     path: c.req.path,
     method: c.req.method,
     userAgent: c.req.header("user-agent"),
@@ -111,16 +156,14 @@ app.notFound((c) => {
 });
 
 // Graceful shutdown handling
-const gracefulShutdown = (signal: string) => {
-  logger.info(`Received ${signal}, starting graceful shutdown...`);
+const gracefulShutdown = async (signal: string) => {
+  container
+    .getLogger()
+    .info(`Received ${signal}, starting graceful shutdown...`);
 
-  // Close database connections
-  db.close();
+  await container.shutdown();
 
-  // Shutdown WebSocket handler
-  wsHandler.shutdown();
-
-  logger.info("Graceful shutdown completed");
+  container.getLogger().info("Graceful shutdown completed");
   process.exit(0);
 };
 
@@ -135,7 +178,7 @@ const server = Bun.serve({
   websocket,
 });
 
-logger.info("Piercer Controller starting", {
+container.getLogger().info("Piercer Controller starting", {
   port: config.port,
   host: config.host,
   databasePath: config.databasePath,
@@ -143,10 +186,18 @@ logger.info("Piercer Controller starting", {
   logLevel: config.logLevel,
 });
 
-logger.info(`Server running on http://${config.host}:${config.port}`);
-logger.info(`WebSocket endpoint: ws://${config.host}:${config.port}/ws`);
-logger.info(`Health check: http://${config.host}:${config.port}/health`);
-logger.info(`API info: http://${config.host}:${config.port}/api/info`);
+container
+  .getLogger()
+  .info(`Server running on http://${config.host}:${config.port}`);
+container
+  .getLogger()
+  .info(`WebSocket endpoint: ws://${config.host}:${config.port}/ws`);
+container
+  .getLogger()
+  .info(`Health check: http://${config.host}:${config.port}/health`);
+container
+  .getLogger()
+  .info(`API info: http://${config.host}:${config.port}/api/info`);
 
 // Export for testing
 export default app;

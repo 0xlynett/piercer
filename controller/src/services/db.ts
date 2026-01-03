@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "crypto";
 
+// Data types
 export interface Agent {
   id: string;
   name: string;
@@ -28,7 +29,44 @@ export interface PendingRequest {
   completed_at?: number;
 }
 
-export class DatabaseService {
+// Database Service Interface
+export interface Db {
+  // Agent operations
+  registerAgent(id: string, name: string, capabilities?: string[]): void;
+  updateAgentStatus(
+    id: string,
+    status: Agent["status"],
+    pendingRequests?: number
+  ): void;
+  getAgent(id: string): Agent | null;
+  getAllAgents(): Agent[];
+  getConnectedAgents(): Agent[];
+
+  // Model mapping operations
+  addModelMapping(internalName: string, publicName: string): string;
+  getModelMapping(publicName: string): ModelMapping | null;
+  getAllModelMappings(): ModelMapping[];
+
+  // Pending request operations
+  addPendingRequest(
+    agentId: string,
+    requestType: "completion" | "chat",
+    model: string
+  ): string;
+  updatePendingRequestStatus(
+    id: string,
+    status: PendingRequest["status"]
+  ): void;
+  getPendingRequest(id: string): PendingRequest | null;
+  getPendingRequestsByAgent(agentId: string): PendingRequest[];
+
+  // Cleanup and maintenance
+  cleanupOldRecords(maxAge?: number): void;
+  close(): void;
+}
+
+// Bun Database Implementation
+export class BunDatabase implements Db {
   private db: Database;
 
   constructor(dbPath: string = "./piercer.db") {
