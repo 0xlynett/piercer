@@ -1,8 +1,11 @@
-import { test, expect } from "bun:test";
-import { PinoLogger } from "../src/services/logger";
-import type { Logger } from "../src/services/logger";
+import { test, expect, describe } from "bun:test";
+import {
+  PinoLogger,
+  createRequestLogger,
+  createAgentLogger,
+} from "../src/services/logger";
 
-test("PinoLogger", () => {
+describe("PinoLogger", () => {
   const logger = new PinoLogger({ level: "info" });
 
   test("should create child logger with additional context", () => {
@@ -113,9 +116,8 @@ test("PinoLogger", () => {
   });
 });
 
-test("Logger factory functions", () => {
+describe("Logger factory functions", () => {
   test("should create request-scoped logger", () => {
-    const { createRequestLogger } = require("../src/services/logger");
     const requestLogger = createRequestLogger("req-123");
 
     expect(requestLogger).toBeDefined();
@@ -125,7 +127,6 @@ test("Logger factory functions", () => {
   });
 
   test("should create agent-scoped logger", () => {
-    const { createAgentLogger } = require("../src/services/logger");
     const agentLogger = createAgentLogger("agent-456");
 
     expect(agentLogger).toBeDefined();

@@ -1,4 +1,4 @@
-import { test, expect, beforeEach, afterEach } from "bun:test";
+import { test, expect, beforeEach, afterEach, describe } from "bun:test";
 import { KkrpcWebSocketHandler } from "../src/apis/websocket";
 import { BunDatabase } from "../src/services/db";
 import { PinoLogger } from "../src/services/logger";
@@ -6,7 +6,7 @@ import type { Db } from "../src/services/db";
 import type { Logger } from "../src/services/logger";
 import { randomUUID } from "crypto";
 
-test("KkrpcWebSocketHandler", () => {
+describe("KkrpcWebSocketHandler", () => {
   let db: Db;
   let logger: Logger;
   let wsHandler: KkrpcWebSocketHandler;

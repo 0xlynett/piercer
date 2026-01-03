@@ -77,12 +77,12 @@ export class PinoLogger implements Logger {
   ) {
     this.logger = pino({
       level: options.level || process.env.LOG_LEVEL || "info",
+      timestamp: pino.stdTimeFunctions.isoTime,
       formatters: {
         level: (label: string) => {
           return { level: label };
         },
       },
-      timestamp: pino.stdTimeFunctions.isoTime,
     });
     this.context = options.context || {};
   }

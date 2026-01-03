@@ -1,9 +1,9 @@
-import { test, expect, beforeEach, afterEach } from "bun:test";
+import { test, expect, beforeEach, afterEach, describe } from "bun:test";
 import { BunDatabase } from "../src/services/db";
 import type { Db } from "../src/services/db";
 import { randomUUID } from "crypto";
 
-test("BunDatabase - Agent operations", () => {
+describe("BunDatabase - Agent operations", () => {
   let db: Db;
   let testDbPath: string;
 
@@ -71,7 +71,7 @@ test("BunDatabase - Agent operations", () => {
   });
 });
 
-test("BunDatabase - Model mapping operations", () => {
+describe("BunDatabase - Model mapping operations", () => {
   let db: Db;
   let testDbPath: string;
 
@@ -113,7 +113,7 @@ test("BunDatabase - Model mapping operations", () => {
   });
 });
 
-test("BunDatabase - Pending request operations", () => {
+describe("BunDatabase - Pending request operations", () => {
   let db: Db;
   let testDbPath: string;
 
@@ -179,7 +179,7 @@ test("BunDatabase - Pending request operations", () => {
   });
 });
 
-test("BunDatabase - Cleanup operations", () => {
+describe("BunDatabase - Cleanup operations", () => {
   let db: Db;
   let testDbPath: string;
 
