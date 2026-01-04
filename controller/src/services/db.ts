@@ -46,6 +46,7 @@ export interface Db {
   addModelMapping(internalName: string, publicName: string): string;
   getModelMapping(publicName: string): ModelMapping | null;
   getAllModelMappings(): ModelMapping[];
+  removeModelMapping(publicName: string): boolean;
 
   // Pending request operations
   addPendingRequest(
@@ -234,6 +235,14 @@ export class BunDatabase implements Db {
       public_name: row.public_name,
       created_at: row.created_at,
     }));
+  }
+
+  removeModelMapping(publicName: string): boolean {
+    const stmt = this.db.prepare(
+      `DELETE FROM model_mappings WHERE public_name = ?`
+    );
+    const result = stmt.run(publicName);
+    return result.changes > 0;
   }
 
   // Pending request operations

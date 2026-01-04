@@ -1,5 +1,6 @@
 import type { Db } from "../services/db";
 import type { Logger } from "../services/logger";
+import type { AgentManager } from "../services/agents";
 
 export interface AgentInfo {
   id: string;
@@ -21,11 +22,18 @@ export interface WebSocketHandler {
 export class KkrpcWebSocketHandler implements WebSocketHandler {
   private db: Db;
   private logger: Logger;
+  private agentManager: AgentManager;
   private connectedAgents: Map<string, AgentInfo> = new Map();
+  private rpc: any;
 
-  constructor(db: Db, logger: Logger) {
+  constructor(db: Db, logger: Logger, agentManager: AgentManager) {
     this.db = db;
     this.logger = logger;
+    this.agentManager = agentManager;
+  }
+
+  public setRpc(rpc: any) {
+    this.rpc = rpc;
   }
 
   public getAgentAPI() {
@@ -33,11 +41,11 @@ export class KkrpcWebSocketHandler implements WebSocketHandler {
       // Controller calls these on agent
       completion: (params: any) => this.handleCompletion(params),
       chat: (params: any) => this.handleChat(params),
-      listModels: () => this.handleListModels(),
-      currentModels: () => this.handleCurrentModels(),
+      listModels: (params: any) => this.handleListModels(params),
+      currentModels: (params: any) => this.handleCurrentModels(params),
       startModel: (params: any) => this.handleStartModel(params),
       downloadModel: (params: any) => this.handleDownloadModel(params),
-      status: () => this.handleStatus(),
+      status: (params: any) => this.handleStatus(params),
 
       // Agent calls these on controller
       error: (params: any) => this.handleAgentError(params),
@@ -62,6 +70,10 @@ export class KkrpcWebSocketHandler implements WebSocketHandler {
   private handleConnection(ws: any, req: Request): void {
     const agentId = req.headers.get("agent-id");
     const agentName = req.headers.get("agent-name");
+    const installedModelsHeader = req.headers.get("agent-installed-models");
+    const installedModels = installedModelsHeader
+      ? installedModelsHeader.split(",")
+      : [];
 
     if (!agentId || !agentName) {
       this.logger.warn("Agent connection rejected: missing headers", {
@@ -92,11 +104,12 @@ export class KkrpcWebSocketHandler implements WebSocketHandler {
 
     this.connectedAgents.set(agentId, agentInfo);
 
-    // Register in database
-    this.db.registerAgent(agentId, agentName, []);
+    // Register in agent manager
+    this.agentManager.addAgent(agentId, agentName);
+    this.agentManager.setInstalledModels(agentId, installedModels);
 
     // Log connection
-    this.logger.agentConnected(agentId, agentName, []);
+    this.logger.agentConnected(agentId, agentName, installedModels);
 
     this.logger.info("Agent connected", {
       agentId,
@@ -134,44 +147,69 @@ export class KkrpcWebSocketHandler implements WebSocketHandler {
   // Controller -> Agent procedures
   private async handleCompletion(params: any): Promise<any> {
     this.logger.info("Completion request", params);
-    // TODO: Implement completion logic
-    return { result: "completion_result" };
+    const { agentId, ...completionParams } = params;
+    if (!this.rpc) throw new Error("RPC not initialized");
+    const agentRpc = this.rpc.to(agentId);
+    return agentRpc.completion(completionParams);
   }
 
   private async handleChat(params: any): Promise<any> {
     this.logger.info("Chat request", params);
-    // TODO: Implement chat logic
-    return { result: "chat_result" };
+    const { agentId, ...chatParams } = params;
+    if (!this.rpc) throw new Error("RPC not initialized");
+    const agentRpc = this.rpc.to(agentId);
+    return agentRpc.chat(chatParams);
   }
 
-  private async handleListModels(): Promise<any> {
-    this.logger.info("List models request");
-    // TODO: Implement list models logic
-    return { models: [] };
+  private async handleListModels({
+    agentId,
+  }: {
+    agentId: string;
+  }): Promise<any> {
+    this.logger.info("List models request", { agentId });
+    if (!this.rpc) throw new Error("RPC not initialized");
+    const agentRpc = this.rpc.to(agentId);
+    const { models } = await agentRpc.listModels();
+    this.agentManager.setInstalledModels(agentId, models);
+    return { models };
   }
 
-  private async handleCurrentModels(): Promise<any> {
-    this.logger.info("Current models request");
-    // TODO: Implement current models logic
-    return { models: [] };
+  private async handleCurrentModels({
+    agentId,
+  }: {
+    agentId: string;
+  }): Promise<any> {
+    this.logger.info("Current models request", { agentId });
+    if (!this.rpc) throw new Error("RPC not initialized");
+    const agentRpc = this.rpc.to(agentId);
+    return agentRpc.currentModels();
   }
 
   private async handleStartModel(params: any): Promise<any> {
     this.logger.info("Start model request", params);
-    // TODO: Implement start model logic
-    return { models: [] };
+    const { agentId, model } = params;
+    if (!this.rpc) throw new Error("RPC not initialized");
+    const agentRpc = this.rpc.to(agentId);
+    const result = await agentRpc.startModel({ model });
+    result.models.forEach((m: string) => {
+      this.agentManager.addLoadedModel(agentId, m);
+    });
+    return result;
   }
 
   private async handleDownloadModel(params: any): Promise<any> {
     this.logger.info("Download model request", params);
-    // TODO: Implement download model logic
-    return { filename: "downloaded_model.gguf" };
+    const { agentId, ...downloadParams } = params;
+    if (!this.rpc) throw new Error("RPC not initialized");
+    const agentRpc = this.rpc.to(agentId);
+    return agentRpc.downloadModel(downloadParams);
   }
 
-  private async handleStatus(): Promise<any> {
-    this.logger.info("Status request");
-    // TODO: Implement status logic
-    return { status: "ready" };
+  private async handleStatus({ agentId }: { agentId: string }): Promise<any> {
+    this.logger.info("Status request", { agentId });
+    if (!this.rpc) throw new Error("RPC not initialized");
+    const agentRpc = this.rpc.to(agentId);
+    return agentRpc.status();
   }
 
   // Agent -> Controller procedures

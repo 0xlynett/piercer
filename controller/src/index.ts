@@ -7,6 +7,7 @@ import { BunDatabase } from "./services/db";
 import type { Db } from "./services/db";
 import { PinoLogger } from "./services/logger";
 import type { Logger } from "./services/logger";
+import { AgentManager } from "./services/agents";
 import { LoadBalancingRouter } from "./services/routing";
 import type { RoutingService } from "./services/routing";
 import { ModelMappingsService } from "./services/mappings";
@@ -14,6 +15,7 @@ import type { MappingsService } from "./services/mappings";
 import { KkrpcWebSocketHandler } from "./apis/websocket";
 import type { WebSocketHandler } from "./apis/websocket";
 import { OpenAIAPIHandler } from "./apis/openai";
+import { ManagementAPIHandler } from "./apis/management";
 
 // Environment configuration
 interface AppConfig {
@@ -38,10 +40,14 @@ const config: AppConfig = {
 class DIContainer {
   private db: Db;
   private logger: Logger;
-  private wsHandler: WebSocketHandler;
+  private wsHandler: any;
+  private wsHandlerInstance: KkrpcWebSocketHandler;
   private routingService: RoutingService;
   private mappingsService: MappingsService;
   private openaiHandler: OpenAIAPIHandler;
+  private managementHandler: ManagementAPIHandler;
+  private agentManager: AgentManager;
+  private rpc: any;
 
   constructor(config: AppConfig) {
     // Initialize logger first (needed by other services)
@@ -50,11 +56,29 @@ class DIContainer {
     // Initialize database
     this.db = new BunDatabase(config.databasePath);
 
+    // Initialize agent manager
+    this.agentManager = new AgentManager(this.db, this.logger);
+
     // Initialize WebSocket handler with dependencies
-    this.wsHandler = new KkrpcWebSocketHandler(this.db, this.logger);
+    this.wsHandlerInstance = new KkrpcWebSocketHandler(
+      this.db,
+      this.logger,
+      this.agentManager
+    );
+
+    const { handler, rpc } = createHonoWebSocketHandler({
+      expose: this.wsHandlerInstance.getAgentAPI(),
+    });
+
+    this.wsHandler = handler;
+    this.rpc = rpc;
+    this.wsHandlerInstance.setRpc(this.rpc);
 
     // Initialize routing service
-    this.routingService = new LoadBalancingRouter(this.db, this.logger);
+    this.routingService = new LoadBalancingRouter(
+      this.agentManager,
+      this.logger
+    );
 
     // Initialize mappings service
     this.mappingsService = new ModelMappingsService(this.db, this.logger);
@@ -67,6 +91,15 @@ class DIContainer {
       mappingsService: this.mappingsService,
       wsHandler: this.wsHandler,
       apiKey: config.apiKey,
+    });
+
+    // Initialize Management API handler
+    this.managementHandler = new ManagementAPIHandler({
+      db: this.db,
+      logger: this.logger,
+      agentManager: this.agentManager,
+      mappingsService: this.mappingsService,
+      wsHandler: this.wsHandler,
     });
   }
 
@@ -92,6 +125,10 @@ class DIContainer {
 
   getOpenAIHandler(): OpenAIAPIHandler {
     return this.openaiHandler;
+  }
+
+  getManagementHandler(): ManagementAPIHandler {
+    return this.managementHandler;
   }
 
   async shutdown(): Promise<void> {
@@ -206,6 +243,35 @@ app.post("/v1/chat/completions", async (c) => {
 app.get("/v1/models", async (c) => {
   const handler = container.getOpenAIHandler();
   return handler.handleModels(c);
+});
+
+// ============================================
+// Management API Endpoints
+// ============================================
+
+app.get("/management/agents", (c) => {
+  const handler = container.getManagementHandler();
+  return handler.listAgents(c);
+});
+
+app.post("/management/mappings", (c) => {
+  const handler = container.getManagementHandler();
+  return handler.createModelMapping(c);
+});
+
+app.get("/management/mappings", (c) => {
+  const handler = container.getManagementHandler();
+  return handler.listModelMappings(c);
+});
+
+app.delete("/management/mappings/:publicName", (c) => {
+  const handler = container.getManagementHandler();
+  return handler.deleteModelMapping(c);
+});
+
+app.post("/management/agents/:agentId/models/download", (c) => {
+  const handler = container.getManagementHandler();
+  return handler.downloadModel(c);
 });
 
 // Error handling middleware

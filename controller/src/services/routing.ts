@@ -1,6 +1,6 @@
 import type { Db } from "./db";
 import type { Logger } from "./logger";
-import type { Agent } from "./db";
+import type { AgentManager, Agent } from "./agents";
 
 export interface RoutingRequest {
   model: string;
@@ -22,11 +22,11 @@ export interface RoutingService {
 
 // Routing Service Implementation
 export class LoadBalancingRouter implements RoutingService {
-  private db: Db;
+  private agentManager: AgentManager;
   private logger: Logger;
 
-  constructor(db: Db, logger: Logger) {
-    this.db = db;
+  constructor(agentManager: AgentManager, logger: Logger) {
+    this.agentManager = agentManager;
     this.logger = logger;
   }
 
@@ -40,20 +40,17 @@ export class LoadBalancingRouter implements RoutingService {
    * In case of tie, use ID order
    */
   async selectAgent(request: RoutingRequest): Promise<RoutingResult | null> {
-    const connectedAgents = this.db.getConnectedAgents();
+    const connectedAgents = this.agentManager.getAllAgents();
 
     if (connectedAgents.length === 0) {
       this.logger.noAvailableAgents(request.requestId);
       return null;
     }
 
-    // For now, we'll assume all agents have all models loaded
-    // In a real implementation, we'd check which agents have the specific model
-    const agentsWithModel = connectedAgents.filter(
-      (agent) =>
-        agent.capabilities.includes(request.model) ||
-        agent.capabilities.length === 0
-    );
+    const agentsWithModel = connectedAgents.filter((agent) => {
+      const installedModels = this.agentManager.getInstalledModels(agent.id);
+      return installedModels.includes(request.model);
+    });
 
     if (agentsWithModel.length === 0) {
       this.logger.warn("No agents available with requested model", {
@@ -66,12 +63,38 @@ export class LoadBalancingRouter implements RoutingService {
 
     // Sort agents by priority criteria
     const sortedAgents = agentsWithModel.sort((a, b) => {
-      // Primary sort: by pending requests (ascending)
-      if (a.pending_requests !== b.pending_requests) {
-        return a.pending_requests - b.pending_requests;
+      const aPending = this.agentManager.getPendingRequests(a.id);
+      const bPending = this.agentManager.getPendingRequests(b.id);
+      const aLoaded = this.agentManager
+        .getLoadedModels(a.id)
+        .includes(request.model);
+      const bLoaded = this.agentManager
+        .getLoadedModels(b.id)
+        .includes(request.model);
+
+      // 1. Agent with zero pending requests and model loaded
+      if (aPending === 0 && aLoaded && (bPending !== 0 || !bLoaded)) return -1;
+      if (bPending === 0 && bLoaded && (aPending !== 0 || !aLoaded)) return 1;
+
+      // 2. Agent with zero pending requests and model installed (but not loaded)
+      if (aPending === 0 && !aLoaded && (bPending !== 0 || bLoaded)) return -1;
+      if (bPending === 0 && !bLoaded && (aPending !== 0 || aLoaded)) return 1;
+
+      // 3. Agent with least pending requests and model loaded
+      if (aLoaded && !bLoaded) return -1;
+      if (bLoaded && !aLoaded) return 1;
+      if (aLoaded && bLoaded) {
+        if (aPending !== bPending) {
+          return aPending - bPending;
+        }
       }
 
-      // Secondary sort: by ID (ascending) for deterministic selection
+      // 4. Agent with least pending requests and model installed (but not loaded)
+      if (aPending !== bPending) {
+        return aPending - bPending;
+      }
+
+      // Tie-breaker
       return a.id.localeCompare(b.id);
     });
 
@@ -82,11 +105,7 @@ export class LoadBalancingRouter implements RoutingService {
       return null;
     }
 
-    const reason = this.generateSelectionReason(
-      selectedAgent,
-      sortedAgents,
-      request
-    );
+    const reason = ""; // TODO: generate reason
 
     this.logger.agentSelected(selectedAgent.id, request.requestId, reason);
 
@@ -101,26 +120,16 @@ export class LoadBalancingRouter implements RoutingService {
     allAgents: Agent[],
     request: RoutingRequest
   ): string {
-    const minPendingRequests = Math.min(
-      ...allAgents.map((a) => a.pending_requests)
-    );
-    const agentsWithMinLoad = allAgents.filter(
-      (a) => a.pending_requests === minPendingRequests
-    );
-
-    if (agentsWithMinLoad.length === 1) {
-      return `Selected agent with lowest load (${selectedAgent.pending_requests} pending requests)`;
-    } else {
-      return `Selected agent among ${agentsWithMinLoad.length} agents with equal lowest load (${selectedAgent.pending_requests} pending requests)`;
-    }
+    // This is a placeholder. A more sophisticated reason can be generated
+    // based on the sorting logic.
+    return `Agent ${selectedAgent.name} was selected.`;
   }
 
   getAvailableAgents(): Agent[] {
-    return this.db.getConnectedAgents();
+    return this.agentManager.getAllAgents();
   }
 
   getAgentLoad(agentId: string): number {
-    const agent = this.db.getAgent(agentId);
-    return agent ? agent.pending_requests : -1;
+    return this.agentManager.getPendingRequests(agentId);
   }
 }

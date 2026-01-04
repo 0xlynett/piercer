@@ -2,6 +2,7 @@ import { test, expect, beforeEach, afterEach, describe } from "bun:test";
 import { KkrpcWebSocketHandler } from "../src/apis/websocket";
 import { BunDatabase } from "../src/services/db";
 import { PinoLogger } from "../src/services/logger";
+import { AgentManager } from "../src/services/agents";
 import type { Db } from "../src/services/db";
 import type { Logger } from "../src/services/logger";
 import { randomUUID } from "crypto";
@@ -9,6 +10,7 @@ import { randomUUID } from "crypto";
 describe("KkrpcWebSocketHandler", () => {
   let db: Db;
   let logger: Logger;
+  let agentManager: AgentManager;
   let wsHandler: KkrpcWebSocketHandler;
   let testDbPath: string;
 
@@ -16,7 +18,8 @@ describe("KkrpcWebSocketHandler", () => {
     testDbPath = `./test-${randomUUID()}.db`;
     db = new BunDatabase(testDbPath);
     logger = new PinoLogger({ level: "info" });
-    wsHandler = new KkrpcWebSocketHandler(db, logger);
+    agentManager = new AgentManager(db, logger);
+    wsHandler = new KkrpcWebSocketHandler(db, logger, agentManager);
   });
 
   afterEach(() => {

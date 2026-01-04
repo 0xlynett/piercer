@@ -33,12 +33,13 @@ Next.js app with authentication and clean layout for visualization.
 
 # Management API
 
-Should be an HTTP API from the controller that includes:
+An HTTP API from the controller that includes:
 
-- Creation of model mappings (map filenames to model names)
-  - e.g. "Llama3.1-8B-Q8_0.gguf", "my-llama3.1-8B_q8.gguf", etc. -> public facing: llama3.1-8b
-- Downloading models onto agents
-- Showing load and other node stats
+- `GET /management/agents`: Returns a list of connected agents and their stats.
+- `POST /management/mappings`: Creates a new model mapping. Requires `public_name` and `filename` in the request body.
+- `GET /management/mappings`: Retrieves all model mappings.
+- `DELETE /management/mappings/:publicName`: Deletes a model mapping.
+- `POST /management/agents/:agentId/models/download`: Triggers a model download on a specific agent. Requires `model_url` and `filename` in the request body.
 
 Update this later.
 
