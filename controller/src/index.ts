@@ -7,8 +7,13 @@ import { BunDatabase } from "./services/db";
 import type { Db } from "./services/db";
 import { PinoLogger } from "./services/logger";
 import type { Logger } from "./services/logger";
+import { LoadBalancingRouter } from "./services/routing";
+import type { RoutingService } from "./services/routing";
+import { ModelMappingsService } from "./services/mappings";
+import type { MappingsService } from "./services/mappings";
 import { KkrpcWebSocketHandler } from "./apis/websocket";
 import type { WebSocketHandler } from "./apis/websocket";
+import { OpenAIAPIHandler } from "./apis/openai";
 
 // Environment configuration
 interface AppConfig {
@@ -17,6 +22,7 @@ interface AppConfig {
   databasePath: string;
   corsOrigin: string;
   logLevel: string;
+  apiKey?: string;
 }
 
 const config: AppConfig = {
@@ -25,6 +31,7 @@ const config: AppConfig = {
   databasePath: process.env.DATABASE_PATH || "./piercer.db",
   corsOrigin: process.env.CORS_ORIGIN || "*",
   logLevel: process.env.LOG_LEVEL || "info",
+  apiKey: process.env.API_KEY,
 };
 
 // Dependency Injection Container
@@ -32,6 +39,9 @@ class DIContainer {
   private db: Db;
   private logger: Logger;
   private wsHandler: WebSocketHandler;
+  private routingService: RoutingService;
+  private mappingsService: MappingsService;
+  private openaiHandler: OpenAIAPIHandler;
 
   constructor(config: AppConfig) {
     // Initialize logger first (needed by other services)
@@ -42,6 +52,22 @@ class DIContainer {
 
     // Initialize WebSocket handler with dependencies
     this.wsHandler = new KkrpcWebSocketHandler(this.db, this.logger);
+
+    // Initialize routing service
+    this.routingService = new LoadBalancingRouter(this.db, this.logger);
+
+    // Initialize mappings service
+    this.mappingsService = new ModelMappingsService(this.db, this.logger);
+
+    // Initialize OpenAI API handler
+    this.openaiHandler = new OpenAIAPIHandler({
+      db: this.db,
+      logger: this.logger,
+      routingService: this.routingService,
+      mappingsService: this.mappingsService,
+      wsHandler: this.wsHandler,
+      apiKey: config.apiKey,
+    });
   }
 
   getDb(): Db {
@@ -54,6 +80,18 @@ class DIContainer {
 
   getWebSocketHandler(): WebSocketHandler {
     return this.wsHandler;
+  }
+
+  getRoutingService(): RoutingService {
+    return this.routingService;
+  }
+
+  getMappingsService(): MappingsService {
+    return this.mappingsService;
+  }
+
+  getOpenAIHandler(): OpenAIAPIHandler {
+    return this.openaiHandler;
   }
 
   async shutdown(): Promise<void> {
@@ -117,10 +155,57 @@ app.get("/api/info", (c) => {
       websocket: "/ws",
       health: "/health",
       api: "/api/info",
+      completions: "/v1/completions",
+      chatCompletions: "/v1/chat/completions",
+      models: "/v1/models",
     },
     connectedAgents: container.getWebSocketHandler().getConnectedAgents()
       .length,
   });
+});
+
+// ============================================
+// OpenAI-Compatible API Endpoints
+// ============================================
+
+// OpenAI API key validation middleware
+app.use("/v1/*", async (c, next) => {
+  const handler = container.getOpenAIHandler();
+  const middleware = handler.validateAPIKey();
+  return middleware(c, next);
+});
+
+// Request ID middleware for OpenAI endpoints
+app.use("/v1/*", async (c, next) => {
+  const handler = container.getOpenAIHandler();
+  const middleware = handler.addRequestId();
+  await middleware(c, next);
+  await next();
+});
+
+// Rate limiting middleware for OpenAI endpoints
+app.use("/v1/*", async (c, next) => {
+  const handler = container.getOpenAIHandler();
+  const middleware = handler.rateLimit();
+  return middleware(c, next);
+});
+
+// Legacy Completions API
+app.post("/v1/completions", async (c) => {
+  const handler = container.getOpenAIHandler();
+  return handler.handleCompletions(c);
+});
+
+// Chat Completions API
+app.post("/v1/chat/completions", async (c) => {
+  const handler = container.getOpenAIHandler();
+  return handler.handleChatCompletions(c);
+});
+
+// Models API
+app.get("/v1/models", async (c) => {
+  const handler = container.getOpenAIHandler();
+  return handler.handleModels(c);
 });
 
 // Error handling middleware
@@ -198,6 +283,17 @@ container
 container
   .getLogger()
   .info(`API info: http://${config.host}:${config.port}/api/info`);
+container
+  .getLogger()
+  .info(`Completions API: http://${config.host}:${config.port}/v1/completions`);
+container
+  .getLogger()
+  .info(
+    `Chat Completions API: http://${config.host}:${config.port}/v1/chat/completions`
+  );
+container
+  .getLogger()
+  .info(`Models API: http://${config.host}:${config.port}/v1/models`);
 
 // Export for testing
 export default app;
