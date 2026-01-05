@@ -3,14 +3,14 @@ import type { Db } from "../services/db";
 import type { Logger } from "../services/logger";
 import type { AgentManager } from "../services/agents";
 import type { MappingsService } from "../services/mappings";
-import type { WebSocketHandler } from "./websocket";
+import type { AgentRPCService } from "../services/agent-rpc";
 
 export interface ManagementAPIConfig {
   db: Db;
   logger: Logger;
   agentManager: AgentManager;
   mappingsService: MappingsService;
-  wsHandler: WebSocketHandler;
+  agentRPCService: AgentRPCService;
 }
 
 export class ManagementAPIHandler {
@@ -18,14 +18,14 @@ export class ManagementAPIHandler {
   private logger: Logger;
   private agentManager: AgentManager;
   private mappingsService: MappingsService;
-  private wsHandler: WebSocketHandler;
+  private agentRPCService: AgentRPCService;
 
   constructor(config: ManagementAPIConfig) {
     this.db = config.db;
     this.logger = config.logger;
     this.agentManager = config.agentManager;
     this.mappingsService = config.mappingsService;
-    this.wsHandler = config.wsHandler;
+    this.agentRPCService = config.agentRPCService;
   }
 
   async createModelMapping(c: Context) {
@@ -66,7 +66,7 @@ export class ManagementAPIHandler {
     );
 
     try {
-      const result = await this.wsHandler.downloadModel({
+      const result = await this.agentRPCService.downloadModel({
         agentId,
         model_url,
         filename,

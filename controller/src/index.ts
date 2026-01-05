@@ -13,6 +13,7 @@ import { LoadBalancingRouter } from "./services/routing";
 import type { RoutingService } from "./services/routing";
 import { ModelMappingsService } from "./services/mappings";
 import type { MappingsService } from "./services/mappings";
+import { AgentRPCService } from "./services/agent-rpc";
 import { PiercerWebSocketHandler } from "./apis/websocket";
 import type { WebSocketHandler } from "./apis/websocket";
 import { OpenAIAPIHandler } from "./apis/openai";
@@ -49,6 +50,7 @@ class DIContainer {
   private openaiHandler: OpenAIAPIHandler;
   private managementHandler: ManagementAPIHandler;
   private agentManager: AgentManager;
+  private agentRPCService: AgentRPCService;
   private rpc: RPC<any>;
   private transport: BunTransport;
 
@@ -62,11 +64,15 @@ class DIContainer {
     // Initialize agent manager
     this.agentManager = new AgentManager(this.db, this.logger);
 
+    // Initialize Agent RPC Service
+    this.agentRPCService = new AgentRPCService(this.agentManager, this.logger);
+
     // Initialize Transport
     this.transport = new BunTransport();
 
     // Initialize RPC
     this.rpc = new RPC(this.transport);
+    this.agentRPCService.setRpc(this.rpc);
 
     // Initialize WebSocket handler with dependencies
     this.wsHandlerInstance = new PiercerWebSocketHandler(
@@ -74,11 +80,11 @@ class DIContainer {
       this.logger,
       this.agentManager,
       this.transport,
+      this.agentRPCService,
       config.agentSecretKey
     );
 
     this.rpc.expose(this.wsHandlerInstance.getAgentAPI());
-    this.wsHandlerInstance.setRpc(this.rpc);
 
     // Initialize routing service
     this.routingService = new LoadBalancingRouter(
@@ -96,7 +102,7 @@ class DIContainer {
       routingService: this.routingService,
       mappingsService: this.mappingsService,
       agentManager: this.agentManager,
-      wsHandler: this.wsHandlerInstance,
+      agentRPCService: this.agentRPCService,
       apiKey: config.apiKey,
     });
 
@@ -106,7 +112,7 @@ class DIContainer {
       logger: this.logger,
       agentManager: this.agentManager,
       mappingsService: this.mappingsService,
-      wsHandler: this.wsHandlerInstance,
+      agentRPCService: this.agentRPCService,
     });
   }
 

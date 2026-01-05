@@ -4,7 +4,7 @@ import type { Logger } from "../services/logger";
 import type { RoutingService } from "../services/routing";
 import type { MappingsService } from "../services/mappings";
 import type { AgentManager } from "../services/agents";
-import type { WebSocketHandler } from "./websocket";
+import type { AgentRPCService } from "../services/agent-rpc";
 import { randomUUID } from "crypto";
 
 // ============================================
@@ -182,7 +182,7 @@ export interface OpenAIAPIConfig {
   routingService: RoutingService;
   mappingsService: MappingsService;
   agentManager: AgentManager;
-  wsHandler: WebSocketHandler;
+  agentRPCService: AgentRPCService;
   apiKey?: string;
   rateLimitMax?: number;
 }
@@ -193,7 +193,7 @@ export class OpenAIAPIHandler {
   private routingService: RoutingService;
   private mappingsService: MappingsService;
   private agentManager: AgentManager;
-  private wsHandler: WebSocketHandler;
+  private agentRPCService: AgentRPCService;
   private apiKey?: string;
   private rateLimitMax: number;
   private requestCounts: Map<string, number[]> = new Map();
@@ -204,7 +204,7 @@ export class OpenAIAPIHandler {
     this.routingService = config.routingService;
     this.mappingsService = config.mappingsService;
     this.agentManager = config.agentManager;
-    this.wsHandler = config.wsHandler;
+    this.agentRPCService = config.agentRPCService;
     this.apiKey = config.apiKey;
     this.rateLimitMax = config.rateLimitMax || 100;
   }
@@ -355,7 +355,7 @@ export class OpenAIAPIHandler {
           }
         );
 
-        await this.wsHandler.startModel({
+        await this.agentRPCService.startModel({
           agentId: routingResult.agent.id,
           model: internalModel,
         });
@@ -521,7 +521,7 @@ export class OpenAIAPIHandler {
         try {
           this.agentManager.registerStream(requestId, controller);
 
-          await this.wsHandler.completion({
+          await this.agentRPCService.completion({
             ...request,
             agentId,
             requestId,
@@ -570,7 +570,7 @@ export class OpenAIAPIHandler {
       start: async (controller) => {
         try {
           this.agentManager.registerStream(requestId, controller);
-          await this.wsHandler.completion({
+          await this.agentRPCService.completion({
             ...request,
             agentId,
             requestId,
@@ -726,7 +726,7 @@ export class OpenAIAPIHandler {
           }
         );
 
-        await this.wsHandler.startModel({
+        await this.agentRPCService.startModel({
           agentId: routingResult.agent.id,
           model: internalModel,
         });
@@ -942,7 +942,7 @@ export class OpenAIAPIHandler {
         try {
           this.agentManager.registerStream(requestId, controller);
 
-          await this.wsHandler.chat({
+          await this.agentRPCService.chat({
             ...request,
             agentId,
             requestId,
@@ -991,7 +991,7 @@ export class OpenAIAPIHandler {
       start: async (controller) => {
         try {
           this.agentManager.registerStream(requestId, controller);
-          await this.wsHandler.chat({
+          await this.agentRPCService.chat({
             ...request,
             agentId,
             requestId,

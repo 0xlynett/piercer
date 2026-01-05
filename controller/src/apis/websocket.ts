@@ -1,10 +1,10 @@
 import type { Db } from "../services/db";
 import type { Logger } from "../services/logger";
 import type { AgentManager } from "../services/agents";
-import type { RPC } from "@piercer/rpc";
 import type { BunTransport } from "../utils/bun-transport";
 import type { WSContext } from "hono/ws";
-import type { AgentFunctions, ControllerFunctions } from "../rpc-types";
+import type { ControllerFunctions } from "../rpc-types";
+import type { AgentRPCService } from "../services/agent-rpc";
 
 export interface AgentInfo {
   id: string;
@@ -23,15 +23,6 @@ export interface WebSocketHandler {
   handleConnection(ws: WSContext, req: Request): void;
   handleDisconnection(ws: WSContext, code: number, reason: string): void;
   handleError(ws: WSContext, error: Error): void;
-
-  // Controller -> Agent methods
-  completion(params: any): Promise<any>;
-  chat(params: any): Promise<any>;
-  listModels(params: { agentId: string }): Promise<any>;
-  currentModels(params: { agentId: string }): Promise<any>;
-  startModel(params: any): Promise<any>;
-  downloadModel(params: any): Promise<any>;
-  status(params: { agentId: string }): Promise<any>;
 }
 
 // WebSocket Handler Implementation
@@ -40,8 +31,8 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
   private logger: Logger;
   private agentManager: AgentManager;
   private connectedAgents: Map<string, AgentInfo> = new Map();
-  private rpc: RPC<ControllerFunctions> | null = null;
   private transport: BunTransport;
+  private agentRPCService: AgentRPCService;
   private agentSecretKey?: string;
 
   constructor(
@@ -49,24 +40,23 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
     logger: Logger,
     agentManager: AgentManager,
     transport: BunTransport,
+    agentRPCService: AgentRPCService,
     agentSecretKey?: string
   ) {
     this.db = db;
     this.logger = logger;
     this.agentManager = agentManager;
     this.transport = transport;
+    this.agentRPCService = agentRPCService;
     this.agentSecretKey = agentSecretKey;
-  }
-
-  public setRpc(rpc: RPC<ControllerFunctions>) {
-    this.rpc = rpc;
   }
 
   public getAgentAPI(): ControllerFunctions {
     return {
       // Agent calls these on controller
-      error: (params: any) => this.handleAgentError(params),
-      receiveCompletion: (params: any) => this.handleReceiveCompletion(params),
+      error: (params: any) => this.agentRPCService.handleAgentError(params),
+      receiveCompletion: (params: any) =>
+        this.agentRPCService.handleReceiveCompletion(params),
     };
   }
 
@@ -168,113 +158,6 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
       this.logger.agentError(agentId, error);
     } else {
       this.logger.error("WebSocket error from unknown connection", error);
-    }
-  }
-
-  // Controller -> Agent procedures
-  public async completion(params: any): Promise<any> {
-    this.logger.info("Completion request", params);
-    const { agentId, ...completionParams } = params;
-    if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
-    return agentRpc.completion(completionParams);
-  }
-
-  public async chat(params: any): Promise<any> {
-    this.logger.info("Chat request", params);
-    const { agentId, ...chatParams } = params;
-    if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
-    return agentRpc.chat(chatParams);
-  }
-
-  public async listModels({ agentId }: { agentId: string }): Promise<any> {
-    this.logger.info("List models request", { agentId });
-    if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
-    const { models } = await agentRpc.listModels();
-    this.agentManager.setInstalledModels(agentId, models);
-    return { models };
-  }
-
-  public async currentModels({ agentId }: { agentId: string }): Promise<any> {
-    this.logger.info("Current models request", { agentId });
-    if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
-    return agentRpc.currentModels();
-  }
-
-  public async startModel(params: any): Promise<any> {
-    this.logger.info("Start model request", params);
-    const { agentId, model } = params;
-    if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
-    const result = await agentRpc.startModel({ model });
-    result.models.forEach((m: string) => {
-      this.agentManager.addLoadedModel(agentId, m);
-    });
-    return result;
-  }
-
-  public async downloadModel(params: any): Promise<any> {
-    this.logger.info("Download model request", params);
-    const { agentId, ...downloadParams } = params;
-    if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
-    return agentRpc.downloadModel(downloadParams);
-  }
-
-  public async status({ agentId }: { agentId: string }): Promise<any> {
-    this.logger.info("Status request", { agentId });
-    if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
-    return agentRpc.status();
-  }
-
-  // Agent -> Controller procedures
-  private handleAgentError(params: any): void {
-    this.logger.error("Agent error", new Error(params.error), {
-      agentId: params.agentId,
-      context: params.context,
-    });
-  }
-
-  private handleReceiveCompletion(params: any): void {
-    const { requestId, data } = params;
-
-    // this.logger.debug("Received completion stream", {
-    //   agentId: params.agentId,
-    //   requestId,
-    //   hasData: !!data,
-    // });
-
-    const streamController = this.agentManager.getStream(requestId);
-    if (!streamController) {
-      this.logger.warn(`Received completion for unknown request: ${requestId}`);
-      return;
-    }
-
-    try {
-      if (data === "[DONE]") {
-        streamController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
-        streamController.close();
-        this.agentManager.removeStream(requestId);
-      } else {
-        // Assume data is the chunk object
-        const chunkData = `data: ${JSON.stringify(data)}\n\n`;
-        streamController.enqueue(new TextEncoder().encode(chunkData));
-      }
-    } catch (error) {
-      this.logger.error(
-        `Error writing to stream for request ${requestId}`,
-        error as Error
-      );
-      try {
-        streamController.error(error);
-      } catch (e) {
-        // Ignore error if stream is already closed
-      }
-      this.agentManager.removeStream(requestId);
     }
   }
 

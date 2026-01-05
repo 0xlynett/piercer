@@ -1,5 +1,6 @@
 import { test, expect, beforeEach, afterEach, describe, mock } from "bun:test";
 import { PiercerWebSocketHandler } from "../src/apis/websocket";
+import { AgentRPCService } from "../src/services/agent-rpc";
 import { BunDatabase } from "../src/services/db";
 import { PinoLogger } from "../src/services/logger";
 import { AgentManager } from "../src/services/agents";
@@ -12,6 +13,7 @@ describe("PiercerWebSocketHandler", () => {
   let db: Db;
   let logger: Logger;
   let agentManager: AgentManager;
+  let agentRPCService: AgentRPCService;
   let wsHandler: PiercerWebSocketHandler;
   let transport: BunTransport;
   let testDbPath: string;
@@ -22,12 +24,14 @@ describe("PiercerWebSocketHandler", () => {
     db = new BunDatabase(testDbPath);
     logger = new PinoLogger({ level: "info" });
     agentManager = new AgentManager(db, logger);
+    agentRPCService = new AgentRPCService(agentManager, logger);
     transport = new BunTransport();
     wsHandler = new PiercerWebSocketHandler(
       db,
       logger,
       agentManager,
-      transport
+      transport,
+      agentRPCService
     );
 
     mockRpc = {
@@ -44,7 +48,7 @@ describe("PiercerWebSocketHandler", () => {
       })),
     };
 
-    wsHandler.setRpc(mockRpc);
+    agentRPCService.setRpc(mockRpc);
   });
 
   afterEach(() => {
@@ -83,7 +87,7 @@ describe("PiercerWebSocketHandler", () => {
 
   test("should handle controller-to-agent procedures", async () => {
     // Test completion procedure
-    const completionResult = await wsHandler.completion({
+    const completionResult = await agentRPCService.completion({
       agentId: "test-agent",
       prompt: "Hello",
     });
@@ -92,7 +96,7 @@ describe("PiercerWebSocketHandler", () => {
     expect(mockRpc.remote).toHaveBeenCalledWith("test-agent");
 
     // Test chat procedure
-    const chatResult = await wsHandler.chat({
+    const chatResult = await agentRPCService.chat({
       agentId: "test-agent",
       messages: [],
     });
@@ -100,19 +104,21 @@ describe("PiercerWebSocketHandler", () => {
     expect(chatResult.result).toBe("chat_result");
 
     // Test list models procedure
-    const modelsResult = await wsHandler.listModels({ agentId: "test-agent" });
+    const modelsResult = await agentRPCService.listModels({
+      agentId: "test-agent",
+    });
     expect(modelsResult).toBeDefined();
     expect(modelsResult.models).toEqual([]);
 
     // Test current models procedure
-    const currentModelsResult = await wsHandler.currentModels({
+    const currentModelsResult = await agentRPCService.currentModels({
       agentId: "test-agent",
     });
     expect(currentModelsResult).toBeDefined();
     expect(currentModelsResult.models).toEqual([]);
 
     // Test start model procedure
-    const startModelResult = await wsHandler.startModel({
+    const startModelResult = await agentRPCService.startModel({
       agentId: "test-agent",
       model: "llama-7b",
     });
@@ -120,7 +126,7 @@ describe("PiercerWebSocketHandler", () => {
     expect(startModelResult.models).toEqual([]);
 
     // Test download model procedure
-    const downloadModelResult = await wsHandler.downloadModel({
+    const downloadModelResult = await agentRPCService.downloadModel({
       agentId: "test-agent",
       url: "https://example.com/model.gguf",
       filename: "model.gguf",
@@ -129,7 +135,9 @@ describe("PiercerWebSocketHandler", () => {
     expect(downloadModelResult.filename).toBe("downloaded_model.gguf");
 
     // Test status procedure
-    const statusResult = await wsHandler.status({ agentId: "test-agent" });
+    const statusResult = await agentRPCService.status({
+      agentId: "test-agent",
+    });
     expect(statusResult).toBeDefined();
     expect(statusResult.status).toBe("ready");
   });
