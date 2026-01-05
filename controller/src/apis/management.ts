@@ -62,11 +62,26 @@ export class ManagementAPIHandler {
     const { model_url, filename } = body;
 
     this.logger.info(
-      `Placeholder: Download request for agent ${agentId}, model ${model_url} as ${filename}`
+      `Download request for agent ${agentId}, model ${model_url} as ${filename}`
     );
 
-    // TODO: actually call the agent via websocket
-    return c.json({ success: true, status: "download_started" });
+    try {
+      const result = await this.wsHandler.downloadModel({
+        agentId,
+        model_url,
+        filename,
+      });
+      return c.json({ success: true, result });
+    } catch (error) {
+      this.logger.error("Failed to trigger model download", error as Error);
+      return c.json(
+        {
+          error: "Failed to trigger model download",
+          details: (error as Error).message,
+        },
+        500
+      );
+    }
   }
 
   async listAgents(c: Context) {

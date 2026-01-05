@@ -42,17 +42,20 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
   private connectedAgents: Map<string, AgentInfo> = new Map();
   private rpc: RPC<ControllerFunctions> | null = null;
   private transport: BunTransport;
+  private agentSecretKey?: string;
 
   constructor(
     db: Db,
     logger: Logger,
     agentManager: AgentManager,
-    transport: BunTransport
+    transport: BunTransport,
+    agentSecretKey?: string
   ) {
     this.db = db;
     this.logger = logger;
     this.agentManager = agentManager;
     this.transport = transport;
+    this.agentSecretKey = agentSecretKey;
   }
 
   public setRpc(rpc: RPC<ControllerFunctions>) {
@@ -68,6 +71,22 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
   }
 
   public handleConnection(ws: WSContext, req: Request): void {
+    // Check authentication if configured
+    if (this.agentSecretKey) {
+      const authHeader = req.headers.get("Authorization");
+      const token = authHeader?.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : null;
+
+      if (!token || token !== this.agentSecretKey) {
+        this.logger.warn("Agent connection rejected: invalid authentication", {
+          hasAuthHeader: !!authHeader,
+        });
+        ws.close(1008, "Invalid authentication");
+        return;
+      }
+    }
+
     const agentId = req.headers.get("agent-id");
     const agentName = req.headers.get("agent-name");
     const installedModelsHeader = req.headers.get("agent-installed-models");
@@ -221,12 +240,42 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
   }
 
   private handleReceiveCompletion(params: any): void {
-    this.logger.debug("Received completion stream", {
-      agentId: params.agentId,
-      requestId: params.requestId,
-      hasData: !!params.data,
-    });
-    // TODO: Forward completion stream to requester
+    const { requestId, data } = params;
+
+    // this.logger.debug("Received completion stream", {
+    //   agentId: params.agentId,
+    //   requestId,
+    //   hasData: !!data,
+    // });
+
+    const streamController = this.agentManager.getStream(requestId);
+    if (!streamController) {
+      this.logger.warn(`Received completion for unknown request: ${requestId}`);
+      return;
+    }
+
+    try {
+      if (data === "[DONE]") {
+        streamController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+        streamController.close();
+        this.agentManager.removeStream(requestId);
+      } else {
+        // Assume data is the chunk object
+        const chunkData = `data: ${JSON.stringify(data)}\n\n`;
+        streamController.enqueue(new TextEncoder().encode(chunkData));
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error writing to stream for request ${requestId}`,
+        error as Error
+      );
+      try {
+        streamController.error(error);
+      } catch (e) {
+        // Ignore error if stream is already closed
+      }
+      this.agentManager.removeStream(requestId);
+    }
   }
 
   // Public methods

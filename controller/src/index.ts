@@ -26,6 +26,7 @@ interface AppConfig {
   corsOrigin: string;
   logLevel: string;
   apiKey?: string;
+  agentSecretKey?: string;
 }
 
 const config: AppConfig = {
@@ -35,6 +36,7 @@ const config: AppConfig = {
   corsOrigin: process.env.CORS_ORIGIN || "*",
   logLevel: process.env.LOG_LEVEL || "info",
   apiKey: process.env.API_KEY,
+  agentSecretKey: process.env.AGENT_SECRET_KEY,
 };
 
 // Dependency Injection Container
@@ -71,7 +73,8 @@ class DIContainer {
       this.db,
       this.logger,
       this.agentManager,
-      this.transport
+      this.transport,
+      config.agentSecretKey
     );
 
     this.rpc.expose(this.wsHandlerInstance.getAgentAPI());
@@ -92,6 +95,7 @@ class DIContainer {
       logger: this.logger,
       routingService: this.routingService,
       mappingsService: this.mappingsService,
+      agentManager: this.agentManager,
       wsHandler: this.wsHandlerInstance,
       apiKey: config.apiKey,
     });

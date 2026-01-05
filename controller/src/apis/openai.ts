@@ -3,6 +3,7 @@ import type { Db } from "../services/db";
 import type { Logger } from "../services/logger";
 import type { RoutingService } from "../services/routing";
 import type { MappingsService } from "../services/mappings";
+import type { AgentManager } from "../services/agents";
 import type { WebSocketHandler } from "./websocket";
 import { randomUUID } from "crypto";
 
@@ -180,6 +181,7 @@ export interface OpenAIAPIConfig {
   logger: Logger;
   routingService: RoutingService;
   mappingsService: MappingsService;
+  agentManager: AgentManager;
   wsHandler: WebSocketHandler;
   apiKey?: string;
   rateLimitMax?: number;
@@ -190,6 +192,7 @@ export class OpenAIAPIHandler {
   private logger: Logger;
   private routingService: RoutingService;
   private mappingsService: MappingsService;
+  private agentManager: AgentManager;
   private wsHandler: WebSocketHandler;
   private apiKey?: string;
   private rateLimitMax: number;
@@ -200,6 +203,7 @@ export class OpenAIAPIHandler {
     this.logger = config.logger;
     this.routingService = config.routingService;
     this.mappingsService = config.mappingsService;
+    this.agentManager = config.agentManager;
     this.wsHandler = config.wsHandler;
     this.apiKey = config.apiKey;
     this.rateLimitMax = config.rateLimitMax || 100;
@@ -335,6 +339,26 @@ export class OpenAIAPIHandler {
           "service_unavailable_error",
           503
         );
+      }
+
+      // Check if model needs to be started
+      const chatLoadedModels = this.agentManager.getLoadedModels(
+        routingResult.agent.id
+      );
+      if (!chatLoadedModels.includes(internalModel)) {
+        this.logger.info(
+          `Model ${internalModel} not loaded on agent ${routingResult.agent.id}. Starting model...`,
+          {
+            requestId,
+            agentId: routingResult.agent.id,
+            model: internalModel,
+          }
+        );
+
+        await this.wsHandler.startModel({
+          agentId: routingResult.agent.id,
+          model: internalModel,
+        });
       }
 
       // Create pending request in database
@@ -495,38 +519,13 @@ export class OpenAIAPIHandler {
     const stream = new ReadableStream({
       start: async (controller) => {
         try {
-          // For now, simulate streaming with a simple response
-          // In a real implementation, this would connect to the agent's WebSocket stream
-          const response = await this.executeCompletion(
+          this.agentManager.registerStream(requestId, controller);
+
+          await this.wsHandler.completion({
+            ...request,
             agentId,
-            request,
-            requestId
-          );
-
-          // Send chunks as SSE
-          for (const choice of response.choices) {
-            const chunk = {
-              id: response.id,
-              object: "text_completion.chunk",
-              created: response.created,
-              model: response.model,
-              choices: [
-                {
-                  index: choice.index,
-                  text: choice.text,
-                  logprobs: choice.logprobs,
-                  finish_reason: choice.finish_reason,
-                },
-              ],
-            };
-
-            const data = `data: ${JSON.stringify(chunk)}\n\n`;
-            controller.enqueue(new TextEncoder().encode(data));
-          }
-
-          // Send done message
-          controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
-          controller.close();
+            requestId,
+          });
         } catch (error) {
           const errorChunk = {
             error: {
@@ -538,7 +537,11 @@ export class OpenAIAPIHandler {
             new TextEncoder().encode(`data: ${JSON.stringify(errorChunk)}\n\n`)
           );
           controller.error(error);
+          this.agentManager.removeStream(requestId);
         }
+      },
+      cancel: () => {
+        this.agentManager.removeStream(requestId);
       },
     });
 
@@ -560,33 +563,101 @@ export class OpenAIAPIHandler {
     request: CompletionRequest,
     requestId: string
   ): Promise<CompletionResponse> {
-    // TODO: Implement actual completion execution via WebSocket
-    // For now, return a mock response
-    const completionId = `cmpl-${randomUUID()}`;
-    const promptTokens = this.estimateTokenCount(
-      Array.isArray(request.prompt) ? request.prompt.join("\n") : request.prompt
-    );
-    const completionTokens = request.max_tokens || 100;
+    let response: CompletionResponse | null = null;
+    let fullText = "";
 
-    return {
-      id: completionId,
-      object: "text_completion",
-      created: Math.floor(Date.now() / 1000),
-      model: request.model,
-      choices: [
-        {
-          index: 0,
-          text: "This is a placeholder completion response. Implement agent communication to get actual completions.",
-          logprobs: null,
-          finish_reason: "stop",
-        },
-      ],
-      usage: {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: promptTokens + completionTokens,
+    const stream = new ReadableStream({
+      start: async (controller) => {
+        try {
+          this.agentManager.registerStream(requestId, controller);
+          await this.wsHandler.completion({
+            ...request,
+            agentId,
+            requestId,
+            stream: false, // Ensure agent knows we want non-streaming if possible, but we handle stream anyway
+          });
+        } catch (error) {
+          controller.error(error);
+          this.agentManager.removeStream(requestId);
+        }
       },
-    };
+      cancel: () => {
+        this.agentManager.removeStream(requestId);
+      },
+    });
+
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value, { stream: true });
+        const lines = text.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6).trim();
+            if (data === "[DONE]") continue;
+
+            try {
+              const chunk = JSON.parse(data);
+              if (!response) {
+                // Initialize response from first chunk
+                response = {
+                  id: chunk.id,
+                  object: "text_completion",
+                  created: chunk.created,
+                  model: chunk.model,
+                  choices: [
+                    {
+                      index: 0,
+                      text: "",
+                      logprobs: null,
+                      finish_reason: "stop",
+                    },
+                  ],
+                  usage: {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                  },
+                };
+              }
+
+              if (chunk.choices && chunk.choices[0]) {
+                fullText += chunk.choices[0].text || "";
+                if (
+                  chunk.choices[0].finish_reason &&
+                  response &&
+                  response.choices[0]
+                ) {
+                  response.choices[0].finish_reason =
+                    chunk.choices[0].finish_reason;
+                }
+              }
+            } catch (e) {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (!response) {
+      throw new Error("No response received from agent");
+    }
+
+    if (response.choices[0]) {
+      response.choices[0].text = fullText;
+    }
+    // TODO: Calculate usage if not provided
+
+    return response;
   }
 
   // ========================================
@@ -639,6 +710,26 @@ export class OpenAIAPIHandler {
           "service_unavailable_error",
           503
         );
+      }
+
+      // Check if model needs to be started
+      const loadedModels = this.agentManager.getLoadedModels(
+        routingResult.agent.id
+      );
+      if (!loadedModels.includes(internalModel)) {
+        this.logger.info(
+          `Model ${internalModel} not loaded on agent ${routingResult.agent.id}. Starting model...`,
+          {
+            requestId,
+            agentId: routingResult.agent.id,
+            model: internalModel,
+          }
+        );
+
+        await this.wsHandler.startModel({
+          agentId: routingResult.agent.id,
+          model: internalModel,
+        });
       }
 
       // Create pending request in database
@@ -849,86 +940,13 @@ export class OpenAIAPIHandler {
     const stream = new ReadableStream({
       start: async (controller) => {
         try {
-          // For now, simulate streaming with a simple response
-          // In a real implementation, this would connect to the agent's WebSocket stream
-          const response = await this.executeChatCompletion(
+          this.agentManager.registerStream(requestId, controller);
+
+          await this.wsHandler.chat({
+            ...request,
             agentId,
-            request,
-            requestId
-          );
-
-          // Send chunks as SSE
-          // First chunk with role
-          const firstChunk = {
-            id: response.id,
-            object: "chat.completion.chunk",
-            created: response.created,
-            model: response.model,
-            choices: [
-              {
-                index: 0,
-                delta: { role: "assistant" },
-                logprobs: null,
-                finish_reason: null,
-              },
-            ],
-          };
-          controller.enqueue(
-            new TextEncoder().encode(`data: ${JSON.stringify(firstChunk)}\n\n`)
-          );
-
-          // Content chunks
-          const firstChoice = response.choices[0];
-          if (!firstChoice) {
-            throw new Error("No choices in response");
-          }
-          const content = firstChoice.message.content;
-          const words = content.split(" ");
-
-          for (let i = 0; i < words.length; i++) {
-            const chunk = {
-              id: response.id,
-              object: "chat.completion.chunk",
-              created: response.created,
-              model: response.model,
-              choices: [
-                {
-                  index: 0,
-                  delta: {
-                    content: words[i] + (i < words.length - 1 ? " " : ""),
-                  },
-                  logprobs: null,
-                  finish_reason: null,
-                },
-              ],
-            };
-            controller.enqueue(
-              new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`)
-            );
-          }
-
-          // Final chunk with finish_reason
-          const finalChunk = {
-            id: response.id,
-            object: "chat.completion.chunk",
-            created: response.created,
-            model: response.model,
-            choices: [
-              {
-                index: 0,
-                delta: {},
-                logprobs: null,
-                finish_reason: "stop",
-              },
-            ],
-          };
-          controller.enqueue(
-            new TextEncoder().encode(`data: ${JSON.stringify(finalChunk)}\n\n`)
-          );
-
-          // Send done message
-          controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
-          controller.close();
+            requestId,
+          });
         } catch (error) {
           const errorChunk = {
             error: {
@@ -940,7 +958,11 @@ export class OpenAIAPIHandler {
             new TextEncoder().encode(`data: ${JSON.stringify(errorChunk)}\n\n`)
           );
           controller.error(error);
+          this.agentManager.removeStream(requestId);
         }
+      },
+      cancel: () => {
+        this.agentManager.removeStream(requestId);
       },
     });
 
@@ -962,37 +984,104 @@ export class OpenAIAPIHandler {
     request: ChatCompletionRequest,
     requestId: string
   ): Promise<ChatCompletionResponse> {
-    // TODO: Implement actual chat completion execution via WebSocket
-    // For now, return a mock response
-    const completionId = `chatcmpl-${randomUUID()}`;
-    const promptTokens = this.estimateTokenCount(
-      request.messages.map((m) => `${m.role}: ${m.content}`).join("\n")
-    );
-    const completionTokens = request.max_tokens || 100;
+    let response: ChatCompletionResponse | null = null;
+    let fullContent = "";
 
-    return {
-      id: completionId,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model: request.model,
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: "assistant",
-            content:
-              "This is a placeholder chat response. Implement agent communication to get actual completions.",
-          },
-          logprobs: null,
-          finish_reason: "stop",
-        },
-      ],
-      usage: {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: promptTokens + completionTokens,
+    const stream = new ReadableStream({
+      start: async (controller) => {
+        try {
+          this.agentManager.registerStream(requestId, controller);
+          await this.wsHandler.chat({
+            ...request,
+            agentId,
+            requestId,
+            stream: false,
+          });
+        } catch (error) {
+          controller.error(error);
+          this.agentManager.removeStream(requestId);
+        }
       },
-    };
+      cancel: () => {
+        this.agentManager.removeStream(requestId);
+      },
+    });
+
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value, { stream: true });
+        const lines = text.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6).trim();
+            if (data === "[DONE]") continue;
+
+            try {
+              const chunk = JSON.parse(data);
+              if (!response) {
+                response = {
+                  id: chunk.id,
+                  object: "chat.completion",
+                  created: chunk.created,
+                  model: chunk.model,
+                  choices: [
+                    {
+                      index: 0,
+                      message: {
+                        role: "assistant",
+                        content: "",
+                      },
+                      logprobs: null,
+                      finish_reason: "stop",
+                    },
+                  ],
+                  usage: {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                  },
+                };
+              }
+
+              if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta) {
+                if (chunk.choices[0].delta.content) {
+                  fullContent += chunk.choices[0].delta.content;
+                }
+                if (
+                  chunk.choices[0].finish_reason &&
+                  response &&
+                  response.choices[0]
+                ) {
+                  response.choices[0].finish_reason =
+                    chunk.choices[0].finish_reason;
+                }
+              }
+            } catch (e) {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (!response) {
+      throw new Error("No response received from agent");
+    }
+
+    if (response.choices[0]) {
+      response.choices[0].message.content = fullContent;
+    }
+
+    return response;
   }
 
   // ========================================

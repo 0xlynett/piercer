@@ -11,8 +11,26 @@ export class AgentManager {
   private loadedModels: Map<string, string[]> = new Map();
   private installedModels: Map<string, string[]> = new Map();
   private pendingRequests: Map<string, number> = new Map();
+  private activeStreams: Map<string, ReadableStreamDefaultController> =
+    new Map();
 
   constructor(private db: Db, private logger: Logger) {}
+
+  // Stream Management
+  registerStream(
+    requestId: string,
+    controller: ReadableStreamDefaultController
+  ): void {
+    this.activeStreams.set(requestId, controller);
+  }
+
+  getStream(requestId: string): ReadableStreamDefaultController | undefined {
+    return this.activeStreams.get(requestId);
+  }
+
+  removeStream(requestId: string): void {
+    this.activeStreams.delete(requestId);
+  }
 
   addAgent(id: string, name: string): void {
     this.agents.set(id, { id, name });
