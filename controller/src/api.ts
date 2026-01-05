@@ -6,5 +6,3 @@ export const api = {
     multiply: (a: number, b: number) => a * b,
   },
 };
-
-function sabot() {}

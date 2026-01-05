@@ -8,5 +8,9 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@piercer/rpc": "workspace:*",
+    "ws": "^8.18.3"
   }
 }

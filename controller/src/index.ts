@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger as honoLogger } from "hono/logger";
 import { upgradeWebSocket, websocket } from "hono/bun";
-import { createHonoWebSocketHandler } from "kkrpc";
+import { RPC } from "@piercer/rpc";
+import { BunTransport } from "./utils/bun-transport";
 import { BunDatabase } from "./services/db";
 import type { Db } from "./services/db";
 import { PinoLogger } from "./services/logger";
@@ -12,7 +13,7 @@ import { LoadBalancingRouter } from "./services/routing";
 import type { RoutingService } from "./services/routing";
 import { ModelMappingsService } from "./services/mappings";
 import type { MappingsService } from "./services/mappings";
-import { KkrpcWebSocketHandler } from "./apis/websocket";
+import { PiercerWebSocketHandler } from "./apis/websocket";
 import type { WebSocketHandler } from "./apis/websocket";
 import { OpenAIAPIHandler } from "./apis/openai";
 import { ManagementAPIHandler } from "./apis/management";
@@ -40,14 +41,14 @@ const config: AppConfig = {
 class DIContainer {
   private db: Db;
   private logger: Logger;
-  private wsHandler: any;
-  private wsHandlerInstance: KkrpcWebSocketHandler;
+  private wsHandlerInstance: PiercerWebSocketHandler;
   private routingService: RoutingService;
   private mappingsService: MappingsService;
   private openaiHandler: OpenAIAPIHandler;
   private managementHandler: ManagementAPIHandler;
   private agentManager: AgentManager;
-  private rpc: any;
+  private rpc: RPC<any>;
+  private transport: BunTransport;
 
   constructor(config: AppConfig) {
     // Initialize logger first (needed by other services)
@@ -59,19 +60,21 @@ class DIContainer {
     // Initialize agent manager
     this.agentManager = new AgentManager(this.db, this.logger);
 
+    // Initialize Transport
+    this.transport = new BunTransport();
+
+    // Initialize RPC
+    this.rpc = new RPC(this.transport);
+
     // Initialize WebSocket handler with dependencies
-    this.wsHandlerInstance = new KkrpcWebSocketHandler(
+    this.wsHandlerInstance = new PiercerWebSocketHandler(
       this.db,
       this.logger,
-      this.agentManager
+      this.agentManager,
+      this.transport
     );
 
-    const { handler, rpc } = createHonoWebSocketHandler({
-      expose: this.wsHandlerInstance.getAgentAPI(),
-    });
-
-    this.wsHandler = handler;
-    this.rpc = rpc;
+    this.rpc.expose(this.wsHandlerInstance.getAgentAPI());
     this.wsHandlerInstance.setRpc(this.rpc);
 
     // Initialize routing service
@@ -89,7 +92,7 @@ class DIContainer {
       logger: this.logger,
       routingService: this.routingService,
       mappingsService: this.mappingsService,
-      wsHandler: this.wsHandler,
+      wsHandler: this.wsHandlerInstance,
       apiKey: config.apiKey,
     });
 
@@ -99,7 +102,7 @@ class DIContainer {
       logger: this.logger,
       agentManager: this.agentManager,
       mappingsService: this.mappingsService,
-      wsHandler: this.wsHandler,
+      wsHandler: this.wsHandlerInstance,
     });
   }
 
@@ -112,7 +115,11 @@ class DIContainer {
   }
 
   getWebSocketHandler(): WebSocketHandler {
-    return this.wsHandler;
+    return this.wsHandlerInstance;
+  }
+
+  getTransport(): BunTransport {
+    return this.transport;
   }
 
   getRoutingService(): RoutingService {
@@ -132,7 +139,7 @@ class DIContainer {
   }
 
   async shutdown(): Promise<void> {
-    this.wsHandler.shutdown();
+    this.wsHandlerInstance.shutdown();
     this.db.close();
   }
 }
@@ -175,10 +182,27 @@ app.get("/health", (c) => {
 // WebSocket endpoint for agent connections
 app.get(
   "/ws",
-  upgradeWebSocket(() => {
-    return createHonoWebSocketHandler({
-      expose: container.getWebSocketHandler().getAgentAPI(),
-    });
+  upgradeWebSocket((c) => {
+    const wsHandler = container.getWebSocketHandler();
+    const transport = container.getTransport();
+
+    return {
+      onOpen: (evt, ws) => {
+        wsHandler.handleConnection(ws, c.req.raw);
+      },
+      onMessage: (evt, ws) => {
+        transport.handleMessage(ws, evt.data);
+      },
+      onClose: (evt, ws) => {
+        wsHandler.handleDisconnection(ws, evt.code, evt.reason);
+      },
+      onError: (evt, ws) => {
+        wsHandler.handleError(
+          ws,
+          (evt as any).error || new Error("Unknown WebSocket error")
+        );
+      },
+    };
   })
 );
 

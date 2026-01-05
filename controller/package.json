@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "hono": "^4.11.3",
-    "kkrpc": "^0.6.0",
+    "@piercer/rpc": "workspace:*",
     "pino": "^10.1.0"
   },
   "scripts": {

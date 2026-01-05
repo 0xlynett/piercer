@@ -1,6 +1,10 @@
 import type { Db } from "../services/db";
 import type { Logger } from "../services/logger";
 import type { AgentManager } from "../services/agents";
+import type { RPC } from "@piercer/rpc";
+import type { BunTransport } from "../utils/bun-transport";
+import type { WSContext } from "hono/ws";
+import type { AgentFunctions, ControllerFunctions } from "../rpc-types";
 
 export interface AgentInfo {
   id: string;
@@ -11,63 +15,59 @@ export interface AgentInfo {
 
 // WebSocket Handler Interface
 export interface WebSocketHandler {
-  getAgentAPI(): any;
+  getAgentAPI(): ControllerFunctions;
   getConnectedAgents(): AgentInfo[];
   isAgentConnected(agentId: string): boolean;
   getAgent(agentId: string): AgentInfo | undefined;
   shutdown(): void;
+  handleConnection(ws: WSContext, req: Request): void;
+  handleDisconnection(ws: WSContext, code: number, reason: string): void;
+  handleError(ws: WSContext, error: Error): void;
+
+  // Controller -> Agent methods
+  completion(params: any): Promise<any>;
+  chat(params: any): Promise<any>;
+  listModels(params: { agentId: string }): Promise<any>;
+  currentModels(params: { agentId: string }): Promise<any>;
+  startModel(params: any): Promise<any>;
+  downloadModel(params: any): Promise<any>;
+  status(params: { agentId: string }): Promise<any>;
 }
 
 // WebSocket Handler Implementation
-export class KkrpcWebSocketHandler implements WebSocketHandler {
+export class PiercerWebSocketHandler implements WebSocketHandler {
   private db: Db;
   private logger: Logger;
   private agentManager: AgentManager;
   private connectedAgents: Map<string, AgentInfo> = new Map();
-  private rpc: any;
+  private rpc: RPC<ControllerFunctions> | null = null;
+  private transport: BunTransport;
 
-  constructor(db: Db, logger: Logger, agentManager: AgentManager) {
+  constructor(
+    db: Db,
+    logger: Logger,
+    agentManager: AgentManager,
+    transport: BunTransport
+  ) {
     this.db = db;
     this.logger = logger;
     this.agentManager = agentManager;
+    this.transport = transport;
   }
 
-  public setRpc(rpc: any) {
+  public setRpc(rpc: RPC<ControllerFunctions>) {
     this.rpc = rpc;
   }
 
-  public getAgentAPI() {
+  public getAgentAPI(): ControllerFunctions {
     return {
-      // Controller calls these on agent
-      completion: (params: any) => this.handleCompletion(params),
-      chat: (params: any) => this.handleChat(params),
-      listModels: (params: any) => this.handleListModels(params),
-      currentModels: (params: any) => this.handleCurrentModels(params),
-      startModel: (params: any) => this.handleStartModel(params),
-      downloadModel: (params: any) => this.handleDownloadModel(params),
-      status: (params: any) => this.handleStatus(params),
-
       // Agent calls these on controller
       error: (params: any) => this.handleAgentError(params),
       receiveCompletion: (params: any) => this.handleReceiveCompletion(params),
     };
   }
 
-  public getConnectionHandlers() {
-    return {
-      open: (ws: any, req: Request) => {
-        this.handleConnection(ws, req);
-      },
-      close: (ws: any, code: number, reason: string) => {
-        this.handleDisconnection(ws, code, reason);
-      },
-      error: (ws: any, error: Error) => {
-        this.handleError(ws, error);
-      },
-    };
-  }
-
-  private handleConnection(ws: any, req: Request): void {
+  public handleConnection(ws: WSContext, req: Request): void {
     const agentId = req.headers.get("agent-id");
     const agentName = req.headers.get("agent-name");
     const installedModelsHeader = req.headers.get("agent-installed-models");
@@ -108,6 +108,9 @@ export class KkrpcWebSocketHandler implements WebSocketHandler {
     this.agentManager.addAgent(agentId, agentName);
     this.agentManager.setInstalledModels(agentId, installedModels);
 
+    // Register with Transport
+    this.transport.registerClient(ws, agentId);
+
     // Log connection
     this.logger.agentConnected(agentId, agentName, installedModels);
 
@@ -118,10 +121,15 @@ export class KkrpcWebSocketHandler implements WebSocketHandler {
     });
   }
 
-  private handleDisconnection(ws: any, code: number, reason: string): void {
-    const agentId = ws.agentId;
+  public handleDisconnection(
+    ws: WSContext,
+    code: number,
+    reason: string
+  ): void {
+    const agentId = this.transport.getClientId(ws);
     if (!agentId) return;
 
+    this.transport.removeClient(ws);
     this.connectedAgents.delete(agentId);
     this.db.updateAgentStatus(agentId, "disconnected");
 
@@ -135,8 +143,8 @@ export class KkrpcWebSocketHandler implements WebSocketHandler {
     });
   }
 
-  private handleError(ws: any, error: Error): void {
-    const agentId = ws.agentId;
+  public handleError(ws: WSContext, error: Error): void {
+    const agentId = this.transport.getClientId(ws);
     if (agentId) {
       this.logger.agentError(agentId, error);
     } else {
@@ -145,51 +153,43 @@ export class KkrpcWebSocketHandler implements WebSocketHandler {
   }
 
   // Controller -> Agent procedures
-  private async handleCompletion(params: any): Promise<any> {
+  public async completion(params: any): Promise<any> {
     this.logger.info("Completion request", params);
     const { agentId, ...completionParams } = params;
     if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.to(agentId);
+    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
     return agentRpc.completion(completionParams);
   }
 
-  private async handleChat(params: any): Promise<any> {
+  public async chat(params: any): Promise<any> {
     this.logger.info("Chat request", params);
     const { agentId, ...chatParams } = params;
     if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.to(agentId);
+    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
     return agentRpc.chat(chatParams);
   }
 
-  private async handleListModels({
-    agentId,
-  }: {
-    agentId: string;
-  }): Promise<any> {
+  public async listModels({ agentId }: { agentId: string }): Promise<any> {
     this.logger.info("List models request", { agentId });
     if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.to(agentId);
+    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
     const { models } = await agentRpc.listModels();
     this.agentManager.setInstalledModels(agentId, models);
     return { models };
   }
 
-  private async handleCurrentModels({
-    agentId,
-  }: {
-    agentId: string;
-  }): Promise<any> {
+  public async currentModels({ agentId }: { agentId: string }): Promise<any> {
     this.logger.info("Current models request", { agentId });
     if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.to(agentId);
+    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
     return agentRpc.currentModels();
   }
 
-  private async handleStartModel(params: any): Promise<any> {
+  public async startModel(params: any): Promise<any> {
     this.logger.info("Start model request", params);
     const { agentId, model } = params;
     if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.to(agentId);
+    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
     const result = await agentRpc.startModel({ model });
     result.models.forEach((m: string) => {
       this.agentManager.addLoadedModel(agentId, m);
@@ -197,18 +197,18 @@ export class KkrpcWebSocketHandler implements WebSocketHandler {
     return result;
   }
 
-  private async handleDownloadModel(params: any): Promise<any> {
+  public async downloadModel(params: any): Promise<any> {
     this.logger.info("Download model request", params);
     const { agentId, ...downloadParams } = params;
     if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.to(agentId);
+    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
     return agentRpc.downloadModel(downloadParams);
   }
 
-  private async handleStatus({ agentId }: { agentId: string }): Promise<any> {
+  public async status({ agentId }: { agentId: string }): Promise<any> {
     this.logger.info("Status request", { agentId });
     if (!this.rpc) throw new Error("RPC not initialized");
-    const agentRpc = this.rpc.to(agentId);
+    const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
     return agentRpc.status();
   }
 

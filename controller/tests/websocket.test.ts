@@ -1,25 +1,50 @@
-import { test, expect, beforeEach, afterEach, describe } from "bun:test";
-import { KkrpcWebSocketHandler } from "../src/apis/websocket";
+import { test, expect, beforeEach, afterEach, describe, mock } from "bun:test";
+import { PiercerWebSocketHandler } from "../src/apis/websocket";
 import { BunDatabase } from "../src/services/db";
 import { PinoLogger } from "../src/services/logger";
 import { AgentManager } from "../src/services/agents";
+import { BunTransport } from "../src/utils/bun-transport";
 import type { Db } from "../src/services/db";
 import type { Logger } from "../src/services/logger";
 import { randomUUID } from "crypto";
 
-describe("KkrpcWebSocketHandler", () => {
+describe("PiercerWebSocketHandler", () => {
   let db: Db;
   let logger: Logger;
   let agentManager: AgentManager;
-  let wsHandler: KkrpcWebSocketHandler;
+  let wsHandler: PiercerWebSocketHandler;
+  let transport: BunTransport;
   let testDbPath: string;
+  let mockRpc: any;
 
   beforeEach(() => {
     testDbPath = `./test-${randomUUID()}.db`;
     db = new BunDatabase(testDbPath);
     logger = new PinoLogger({ level: "info" });
     agentManager = new AgentManager(db, logger);
-    wsHandler = new KkrpcWebSocketHandler(db, logger, agentManager);
+    transport = new BunTransport();
+    wsHandler = new PiercerWebSocketHandler(
+      db,
+      logger,
+      agentManager,
+      transport
+    );
+
+    mockRpc = {
+      remote: mock((agentId) => ({
+        completion: mock(async () => ({ result: "completion_result" })),
+        chat: mock(async () => ({ result: "chat_result" })),
+        listModels: mock(async () => ({ models: [] })),
+        currentModels: mock(async () => ({ models: [] })),
+        startModel: mock(async () => ({ models: [] })),
+        downloadModel: mock(async () => ({
+          filename: "downloaded_model.gguf",
+        })),
+        status: mock(async () => ({ status: "ready" })),
+      })),
+    };
+
+    wsHandler.setRpc(mockRpc);
   });
 
   afterEach(() => {
@@ -49,49 +74,54 @@ describe("KkrpcWebSocketHandler", () => {
   test("should get agent API", () => {
     const api = wsHandler.getAgentAPI();
     expect(api).toBeDefined();
-    expect(typeof api.completion).toBe("function");
-    expect(typeof api.chat).toBe("function");
-    expect(typeof api.listModels).toBe("function");
-    expect(typeof api.currentModels).toBe("function");
-    expect(typeof api.startModel).toBe("function");
-    expect(typeof api.downloadModel).toBe("function");
-    expect(typeof api.status).toBe("function");
     expect(typeof api.error).toBe("function");
     expect(typeof api.receiveCompletion).toBe("function");
+    // These should NOT be in the exposed API anymore
+    expect((api as any).completion).toBeUndefined();
+    expect((api as any).chat).toBeUndefined();
   });
 
   test("should handle controller-to-agent procedures", async () => {
     // Test completion procedure
-    const completionResult = await wsHandler
-      .getAgentAPI()
-      .completion({ prompt: "Hello" });
+    const completionResult = await wsHandler.completion({
+      agentId: "test-agent",
+      prompt: "Hello",
+    });
     expect(completionResult).toBeDefined();
     expect(completionResult.result).toBe("completion_result");
+    expect(mockRpc.remote).toHaveBeenCalledWith("test-agent");
 
     // Test chat procedure
-    const chatResult = await wsHandler.getAgentAPI().chat({ messages: [] });
+    const chatResult = await wsHandler.chat({
+      agentId: "test-agent",
+      messages: [],
+    });
     expect(chatResult).toBeDefined();
     expect(chatResult.result).toBe("chat_result");
 
     // Test list models procedure
-    const modelsResult = await wsHandler.getAgentAPI().listModels();
+    const modelsResult = await wsHandler.listModels({ agentId: "test-agent" });
     expect(modelsResult).toBeDefined();
     expect(modelsResult.models).toEqual([]);
 
     // Test current models procedure
-    const currentModelsResult = await wsHandler.getAgentAPI().currentModels();
+    const currentModelsResult = await wsHandler.currentModels({
+      agentId: "test-agent",
+    });
     expect(currentModelsResult).toBeDefined();
     expect(currentModelsResult.models).toEqual([]);
 
     // Test start model procedure
-    const startModelResult = await wsHandler
-      .getAgentAPI()
-      .startModel({ model: "llama-7b" });
+    const startModelResult = await wsHandler.startModel({
+      agentId: "test-agent",
+      model: "llama-7b",
+    });
     expect(startModelResult).toBeDefined();
     expect(startModelResult.models).toEqual([]);
 
     // Test download model procedure
-    const downloadModelResult = await wsHandler.getAgentAPI().downloadModel({
+    const downloadModelResult = await wsHandler.downloadModel({
+      agentId: "test-agent",
       url: "https://example.com/model.gguf",
       filename: "model.gguf",
     });
@@ -99,7 +129,7 @@ describe("KkrpcWebSocketHandler", () => {
     expect(downloadModelResult.filename).toBe("downloaded_model.gguf");
 
     // Test status procedure
-    const statusResult = await wsHandler.getAgentAPI().status();
+    const statusResult = await wsHandler.status({ agentId: "test-agent" });
     expect(statusResult).toBeDefined();
     expect(statusResult.status).toBe("ready");
   });
