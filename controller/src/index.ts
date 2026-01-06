@@ -201,6 +201,7 @@ app.get(
         wsHandler.handleConnection(ws, c.req.raw);
       },
       onMessage: (evt, ws) => {
+        console.log("Server received raw message:", evt.data);
         transport.handleMessage(ws, evt.data);
       },
       onClose: (evt, ws) => {
@@ -356,7 +357,7 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 // Start server
-const server = Bun.serve({
+export const server = Bun.serve({
   port: config.port,
   hostname: config.host,
   fetch: app.fetch,

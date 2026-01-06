@@ -98,12 +98,16 @@ export class LoadBalancingRouter implements RoutingService {
       return a.id.localeCompare(b.id);
     });
 
+    this.logger.info("Sorted agents", {
+      sortedAgents: sortedAgents.map((a) => a.id),
+    });
     const selectedAgent = sortedAgents[0];
 
     if (!selectedAgent) {
       this.logger.noAvailableAgents(request.requestId);
       return null;
     }
+    this.logger.info("Selected agent", { selectedAgent: selectedAgent.id });
 
     const reason = ""; // TODO: generate reason
 

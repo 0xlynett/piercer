@@ -69,7 +69,7 @@ export class RPC<T extends Record<string, Function>> {
     } else if (message.method && this.exposedMethods?.[message.method]) {
       const method = this.exposedMethods[message.method];
       if (!method) return;
-      Promise.resolve(method(...message.params))
+      Promise.resolve(method.apply(null, message.params))
         .then((result) => {
           if (message.id) {
             this.transport.send(

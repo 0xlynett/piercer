@@ -140,6 +140,7 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
 
     this.transport.removeClient(ws);
     this.connectedAgents.delete(agentId);
+    this.agentManager.removeAgent(agentId);
     this.db.updateAgentStatus(agentId, "disconnected");
 
     this.logger.agentDisconnected(agentId, reason || `Code: ${code}`);

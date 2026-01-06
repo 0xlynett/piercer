@@ -36,6 +36,7 @@ export class WebSocketTransport extends EventEmitter implements Transport {
   }
 
   send(message: any, clientId?: string): void {
+    console.log("WebSocketTransport sending:", message);
     if (this.ws instanceof WebSocket) {
       this.ws.send(JSON.stringify(message));
     } else if (clientId) {

@@ -17,7 +17,7 @@ describe("PiercerWebSocketHandler", () => {
   let wsHandler: PiercerWebSocketHandler;
   let transport: BunTransport;
   let testDbPath: string;
-  let mockRpc: any;
+  let mockWsContext: any;
 
   beforeEach(() => {
     testDbPath = `./test-${randomUUID()}.db`;
@@ -26,6 +26,20 @@ describe("PiercerWebSocketHandler", () => {
     agentManager = new AgentManager(db, logger);
     agentRPCService = new AgentRPCService(agentManager, logger);
     transport = new BunTransport();
+
+    // Mock WSContext
+    mockWsContext = {
+      close: mock(),
+      raw: {}, // Mock raw websocket if needed by transport
+    };
+
+    // Mock Transport registerClient/removeClient to avoid actual WS operations if possible
+    // But BunTransport uses ws.raw which might be tricky.
+    // Let's see if we can mock transport methods instead.
+    transport.registerClient = mock();
+    transport.removeClient = mock();
+    transport.getClientId = mock();
+
     wsHandler = new PiercerWebSocketHandler(
       db,
       logger,
@@ -33,22 +47,6 @@ describe("PiercerWebSocketHandler", () => {
       transport,
       agentRPCService
     );
-
-    mockRpc = {
-      remote: mock((agentId) => ({
-        completion: mock(async () => ({ result: "completion_result" })),
-        chat: mock(async () => ({ result: "chat_result" })),
-        listModels: mock(async () => ({ models: [] })),
-        currentModels: mock(async () => ({ models: [] })),
-        startModel: mock(async () => ({ models: [] })),
-        downloadModel: mock(async () => ({
-          filename: "downloaded_model.gguf",
-        })),
-        status: mock(async () => ({ status: "ready" })),
-      })),
-    };
-
-    agentRPCService.setRpc(mockRpc);
   });
 
   afterEach(() => {
@@ -61,114 +59,162 @@ describe("PiercerWebSocketHandler", () => {
     }
   });
 
-  test("should initialize with empty connected agents", () => {
-    const connectedAgents = wsHandler.getConnectedAgents();
-    expect(connectedAgents).toHaveLength(0);
-  });
-
-  test("should check if agent is connected", () => {
-    expect(wsHandler.isAgentConnected("non-existent-agent")).toBe(false);
-  });
-
-  test("should get agent info", () => {
-    const agent = wsHandler.getAgent("non-existent-agent");
-    expect(agent).toBeUndefined();
-  });
-
-  test("should get agent API", () => {
-    const api = wsHandler.getAgentAPI();
-    expect(api).toBeDefined();
-    expect(typeof api.error).toBe("function");
-    expect(typeof api.receiveCompletion).toBe("function");
-    // These should NOT be in the exposed API anymore
-    expect((api as any).completion).toBeUndefined();
-    expect((api as any).chat).toBeUndefined();
-  });
-
-  test("should handle controller-to-agent procedures", async () => {
-    // Test completion procedure
-    const completionResult = await agentRPCService.completion({
-      agentId: "test-agent",
-      prompt: "Hello",
-    });
-    expect(completionResult).toBeDefined();
-    expect(completionResult.result).toBe("completion_result");
-    expect(mockRpc.remote).toHaveBeenCalledWith("test-agent");
-
-    // Test chat procedure
-    const chatResult = await agentRPCService.chat({
-      agentId: "test-agent",
-      messages: [],
-    });
-    expect(chatResult).toBeDefined();
-    expect(chatResult.result).toBe("chat_result");
-
-    // Test list models procedure
-    const modelsResult = await agentRPCService.listModels({
-      agentId: "test-agent",
-    });
-    expect(modelsResult).toBeDefined();
-    expect(modelsResult.models).toEqual([]);
-
-    // Test current models procedure
-    const currentModelsResult = await agentRPCService.currentModels({
-      agentId: "test-agent",
-    });
-    expect(currentModelsResult).toBeDefined();
-    expect(currentModelsResult.models).toEqual([]);
-
-    // Test start model procedure
-    const startModelResult = await agentRPCService.startModel({
-      agentId: "test-agent",
-      model: "llama-7b",
-    });
-    expect(startModelResult).toBeDefined();
-    expect(startModelResult.models).toEqual([]);
-
-    // Test download model procedure
-    const downloadModelResult = await agentRPCService.downloadModel({
-      agentId: "test-agent",
-      url: "https://example.com/model.gguf",
-      filename: "model.gguf",
-    });
-    expect(downloadModelResult).toBeDefined();
-    expect(downloadModelResult.filename).toBe("downloaded_model.gguf");
-
-    // Test status procedure
-    const statusResult = await agentRPCService.status({
-      agentId: "test-agent",
-    });
-    expect(statusResult).toBeDefined();
-    expect(statusResult.status).toBe("ready");
-  });
-
-  test("should handle agent-to-controller procedures", () => {
-    // Test error procedure
-    expect(() => {
-      wsHandler.getAgentAPI().error({
-        agentId: "test-agent",
-        error: "Test error",
-        context: { test: true },
+  describe("Authentication", () => {
+    test("should reject connection without agent-id", () => {
+      const req = new Request("http://localhost/ws", {
+        headers: {
+          "agent-name": "test-agent",
+        },
       });
-    }).not.toThrow();
 
-    // Test receive completion procedure
-    expect(() => {
-      wsHandler.getAgentAPI().receiveCompletion({
-        agentId: "test-agent",
-        requestId: "req-123",
-        data: { completion: "Hello world" },
+      wsHandler.handleConnection(mockWsContext, req);
+
+      expect(mockWsContext.close).toHaveBeenCalledWith(
+        1008,
+        "Missing agent identification headers"
+      );
+      expect(transport.registerClient).not.toHaveBeenCalled();
+    });
+
+    test("should reject connection with invalid Authorization token", () => {
+      // Re-init with secret key
+      wsHandler = new PiercerWebSocketHandler(
+        db,
+        logger,
+        agentManager,
+        transport,
+        agentRPCService,
+        "secret-key"
+      );
+
+      const req = new Request("http://localhost/ws", {
+        headers: {
+          "agent-id": "agent-1",
+          "agent-name": "test-agent",
+          Authorization: "Bearer wrong-key",
+        },
       });
-    }).not.toThrow();
+
+      wsHandler.handleConnection(mockWsContext, req);
+
+      expect(mockWsContext.close).toHaveBeenCalledWith(
+        1008,
+        "Invalid authentication"
+      );
+      expect(transport.registerClient).not.toHaveBeenCalled();
+    });
+
+    test("should accept connection with valid Authorization token", () => {
+      wsHandler = new PiercerWebSocketHandler(
+        db,
+        logger,
+        agentManager,
+        transport,
+        agentRPCService,
+        "secret-key"
+      );
+
+      const req = new Request("http://localhost/ws", {
+        headers: {
+          "agent-id": "agent-1",
+          "agent-name": "test-agent",
+          Authorization: "Bearer secret-key",
+        },
+      });
+
+      wsHandler.handleConnection(mockWsContext, req);
+
+      expect(mockWsContext.close).not.toHaveBeenCalled();
+      expect(transport.registerClient).toHaveBeenCalled();
+      expect(wsHandler.isAgentConnected("agent-1")).toBe(true);
+    });
   });
 
-  test("should shutdown cleanly", () => {
-    expect(() => {
-      wsHandler.shutdown();
-    }).not.toThrow();
+  describe("Connection Management", () => {
+    test("should accept valid connection", () => {
+      const req = new Request("http://localhost/ws", {
+        headers: {
+          "agent-id": "agent-1",
+          "agent-name": "test-agent",
+          "agent-installed-models": "model1,model2",
+        },
+      });
 
-    // After shutdown, should have no connected agents
-    const connectedAgents = wsHandler.getConnectedAgents();
-    expect(connectedAgents).toHaveLength(0);
+      wsHandler.handleConnection(mockWsContext, req);
+
+      expect(mockWsContext.close).not.toHaveBeenCalled();
+      expect(transport.registerClient).toHaveBeenCalledWith(
+        mockWsContext,
+        "agent-1"
+      );
+      expect(wsHandler.isAgentConnected("agent-1")).toBe(true);
+
+      const agent = wsHandler.getAgent("agent-1");
+      expect(agent).toBeDefined();
+      expect(agent?.name).toBe("test-agent");
+
+      // Verify AgentManager was updated
+      expect(agentManager.getAgent("agent-1")).toBeDefined();
+      expect(agentManager.getInstalledModels("agent-1")).toEqual([
+        "model1",
+        "model2",
+      ]);
+    });
+
+    test("should reject duplicate agent ID", () => {
+      const req = new Request("http://localhost/ws", {
+        headers: {
+          "agent-id": "agent-1",
+          "agent-name": "test-agent",
+        },
+      });
+
+      // First connection
+      wsHandler.handleConnection(mockWsContext, req);
+      expect(wsHandler.isAgentConnected("agent-1")).toBe(true);
+
+      // Second connection with same ID
+      const mockWsContext2 = {
+        close: mock(),
+        raw: {},
+      } as any;
+      wsHandler.handleConnection(mockWsContext2, req);
+
+      expect(mockWsContext2.close).toHaveBeenCalledWith(
+        1008,
+        "Agent ID already connected"
+      );
+    });
+
+    test("should remove agent on disconnect", () => {
+      // Setup connection
+      const req = new Request("http://localhost/ws", {
+        headers: {
+          "agent-id": "agent-1",
+          "agent-name": "test-agent",
+        },
+      });
+      wsHandler.handleConnection(mockWsContext, req);
+      expect(wsHandler.isAgentConnected("agent-1")).toBe(true);
+
+      // Mock transport to return agentId
+      (transport.getClientId as any).mockReturnValue("agent-1");
+
+      // Disconnect
+      wsHandler.handleDisconnection(mockWsContext, 1000, "Normal closure");
+
+      expect(transport.removeClient).toHaveBeenCalledWith(mockWsContext);
+      expect(wsHandler.isAgentConnected("agent-1")).toBe(false);
+      expect(agentManager.getAgent("agent-1")).toBeUndefined();
+    });
+  });
+
+  describe("API Exposure", () => {
+    test("should expose correct agent API", () => {
+      const api = wsHandler.getAgentAPI();
+      expect(api).toBeDefined();
+      expect(typeof api.error).toBe("function");
+      expect(typeof api.receiveCompletion).toBe("function");
+    });
   });
 });

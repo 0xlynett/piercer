@@ -557,6 +557,7 @@ export class OpenAIAPIHandler {
 
   /**
    * Execute completion on agent
+   * BUG LIES HERE
    */
   private async executeCompletion(
     agentId: string,
@@ -726,10 +727,15 @@ export class OpenAIAPIHandler {
           }
         );
 
-        await this.agentRPCService.startModel({
-          agentId: routingResult.agent.id,
-          model: internalModel,
-        });
+        try {
+          await this.agentRPCService.startModel({
+            agentId: routingResult.agent.id,
+            model: internalModel,
+          });
+          console.log("DEBUG after starting model");
+        } catch (error) {
+          console.error("Error starting model", error);
+        }
       }
 
       // Create pending request in database
@@ -738,6 +744,7 @@ export class OpenAIAPIHandler {
         "chat",
         internalModel
       );
+      console.log("DEBUG after adding pending request");
 
       // Handle streaming vs non-streaming
       if (request.stream) {
@@ -748,6 +755,8 @@ export class OpenAIAPIHandler {
           requestId
         );
       }
+
+      console.log("DEBUG before execute chat completion");
 
       // Non-streaming chat completion
       const response = await this.executeChatCompletion(
@@ -939,14 +948,17 @@ export class OpenAIAPIHandler {
   ): Promise<Response> {
     const stream = new ReadableStream({
       start: async (controller) => {
+        console.log("Stream started for requestId:", requestId);
         try {
           this.agentManager.registerStream(requestId, controller);
 
+          console.log("Calling agentRPCService.chat");
           await this.agentRPCService.chat({
             ...request,
             agentId,
             requestId,
           });
+          console.log("agentRPCService.chat called successfully");
         } catch (error) {
           const errorChunk = {
             error: {
@@ -991,11 +1003,19 @@ export class OpenAIAPIHandler {
       start: async (controller) => {
         try {
           this.agentManager.registerStream(requestId, controller);
+          this.logger.info(`Forwarding request to agent`, {
+            requestId,
+            agentId,
+          });
           await this.agentRPCService.chat({
             ...request,
             agentId,
             requestId,
             stream: false,
+          });
+          this.logger.info(`Request forwarded to agent`, {
+            requestId,
+            agentId,
           });
         } catch (error) {
           controller.error(error);
