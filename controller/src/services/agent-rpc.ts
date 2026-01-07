@@ -85,33 +85,64 @@ export class AgentRPCService {
   public handleReceiveCompletion(params: any): void {
     const { requestId, data } = params;
 
+    // Check if this is a streaming request (has a stream controller)
     const streamController = this.agentManager.getStream(requestId);
-    if (!streamController) {
+    
+    // Check if this is a non-streaming request (has a completion buffer)
+    const completionBuffer = this.agentManager.getCompletionBuffer(requestId);
+
+    if (!streamController && !completionBuffer) {
       this.logger.warn(`Received completion for unknown request: ${requestId}`);
       return;
     }
 
-    try {
-      if (data === "[DONE]") {
-        streamController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
-        streamController.close();
-        this.agentManager.removeStream(requestId);
-      } else {
-        // Assume data is the chunk object
-        const chunkData = `data: ${JSON.stringify(data)}\n\n`;
-        streamController.enqueue(new TextEncoder().encode(chunkData));
-      }
-    } catch (error) {
-      this.logger.error(
-        `Error writing to stream for request ${requestId}`,
-        error as Error
-      );
+    // Handle streaming requests
+    if (streamController) {
       try {
-        streamController.error(error);
-      } catch (e) {
-        // Ignore error if stream is already closed
+        if (data === "[DONE]") {
+          streamController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+          streamController.close();
+          this.agentManager.removeStream(requestId);
+        } else {
+          // Assume data is the chunk object
+          const chunkData = `data: ${JSON.stringify(data)}\n\n`;
+          streamController.enqueue(new TextEncoder().encode(chunkData));
+        }
+      } catch (error) {
+        this.logger.error(
+          `Error writing to stream for request ${requestId}`,
+          error as Error
+        );
+        try {
+          streamController.error(error);
+        } catch (e) {
+          // Ignore error if stream is already closed
+        }
+        this.agentManager.removeStream(requestId);
       }
-      this.agentManager.removeStream(requestId);
+      return;
+    }
+
+    // Handle non-streaming requests (accumulate chunks in buffer)
+    if (completionBuffer) {
+      try {
+        if (data === "[DONE]") {
+          // Combine all chunks and resolve the Promise
+          this.agentManager.resolveCompletionBuffer(
+            requestId,
+            completionBuffer.chunks
+          );
+        } else {
+          // Accumulate chunk in the buffer
+          this.agentManager.addChunkToBuffer(requestId, data);
+        }
+      } catch (error) {
+        this.logger.error(
+          `Error processing non-streaming completion for request ${requestId}`,
+          error as Error
+        );
+        this.agentManager.rejectCompletionBuffer(requestId, error);
+      }
     }
   }
 }

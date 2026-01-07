@@ -252,7 +252,6 @@ app.use("/v1/*", async (c, next) => {
   const handler = container.getOpenAIHandler();
   const middleware = handler.addRequestId();
   await middleware(c, next);
-  await next();
 });
 
 // Rate limiting middleware for OpenAI endpoints

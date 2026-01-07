@@ -556,97 +556,72 @@ export class OpenAIAPIHandler {
   }
 
   /**
-   * Execute completion on agent
-   * BUG LIES HERE
+   * Execute completion on agent (non-streaming)
    */
   private async executeCompletion(
     agentId: string,
     request: CompletionRequest,
     requestId: string
   ): Promise<CompletionResponse> {
+    // Register a completion buffer and get the Promise
+    const completionPromise = this.agentManager.registerCompletionBuffer(requestId);
+
+    this.logger.info(`Forwarding non-streaming completion request to agent`, {
+      requestId,
+      agentId,
+    });
+
+    // Call the agent RPC (fire and forget - results come via WebSocket)
+    this.agentRPCService.completion({
+      ...request,
+      agentId,
+      requestId,
+      stream: false,
+    }).catch((error) => {
+      this.logger.error(`Error calling agent RPC for request ${requestId}`, error as Error);
+      this.agentManager.rejectCompletionBuffer(requestId, error);
+    });
+
+    // Wait for all chunks to be accumulated via WebSocket messages
+    const chunks = await completionPromise;
+
+    this.logger.info(`Received ${chunks.length} chunks for completion request ${requestId}`);
+
+    // Combine chunks into final response
     let response: CompletionResponse | null = null;
     let fullText = "";
 
-    const stream = new ReadableStream({
-      start: async (controller) => {
-        try {
-          this.agentManager.registerStream(requestId, controller);
-          await this.agentRPCService.completion({
-            ...request,
-            agentId,
-            requestId,
-            stream: false, // Ensure agent knows we want non-streaming if possible, but we handle stream anyway
-          });
-        } catch (error) {
-          controller.error(error);
-          this.agentManager.removeStream(requestId);
-        }
-      },
-      cancel: () => {
-        this.agentManager.removeStream(requestId);
-      },
-    });
+    for (const chunk of chunks) {
+      if (!response) {
+        // Initialize response from first chunk
+        response = {
+          id: chunk.id,
+          object: "text_completion",
+          created: chunk.created,
+          model: chunk.model,
+          choices: [
+            {
+              index: 0,
+              text: "",
+              logprobs: null,
+              finish_reason: "stop",
+            },
+          ],
+          usage: {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+          },
+        };
+      }
 
-    const reader = stream.getReader();
-    const decoder = new TextDecoder();
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const text = decoder.decode(value, { stream: true });
-        const lines = text.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6).trim();
-            if (data === "[DONE]") continue;
-
-            try {
-              const chunk = JSON.parse(data);
-              if (!response) {
-                // Initialize response from first chunk
-                response = {
-                  id: chunk.id,
-                  object: "text_completion",
-                  created: chunk.created,
-                  model: chunk.model,
-                  choices: [
-                    {
-                      index: 0,
-                      text: "",
-                      logprobs: null,
-                      finish_reason: "stop",
-                    },
-                  ],
-                  usage: {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                  },
-                };
-              }
-
-              if (chunk.choices && chunk.choices[0]) {
-                fullText += chunk.choices[0].text || "";
-                if (
-                  chunk.choices[0].finish_reason &&
-                  response &&
-                  response.choices[0]
-                ) {
-                  response.choices[0].finish_reason =
-                    chunk.choices[0].finish_reason;
-                }
-              }
-            } catch (e) {
-              // Ignore parse errors
-            }
-          }
+      // Accumulate text from chunk
+      if (chunk.choices && chunk.choices[0]) {
+        fullText += chunk.choices[0].text || "";
+        if (chunk.choices[0].finish_reason && response && response.choices[0]) {
+          response.choices[0].finish_reason = chunk.choices[0].finish_reason;
         }
       }
-    } finally {
-      reader.releaseLock();
     }
 
     if (!response) {
@@ -989,108 +964,77 @@ export class OpenAIAPIHandler {
   }
 
   /**
-   * Execute chat completion on agent
+   * Execute chat completion on agent (non-streaming)
    */
   private async executeChatCompletion(
     agentId: string,
     request: ChatCompletionRequest,
     requestId: string
   ): Promise<ChatCompletionResponse> {
+    // Register a completion buffer and get the Promise
+    const completionPromise = this.agentManager.registerCompletionBuffer(requestId);
+
+    this.logger.info(`Forwarding non-streaming request to agent`, {
+      requestId,
+      agentId,
+    });
+
+    // Call the agent RPC (fire and forget - results come via WebSocket)
+    this.agentRPCService.chat({
+      ...request,
+      agentId,
+      requestId,
+      stream: false,
+    }).catch((error) => {
+      this.logger.error(`Error calling agent RPC for request ${requestId}`, error as Error);
+      this.agentManager.rejectCompletionBuffer(requestId, error);
+    });
+
+    // Wait for all chunks to be accumulated via WebSocket messages
+    const chunks = await completionPromise;
+
+    this.logger.info(`Received ${chunks.length} chunks for request ${requestId}`);
+
+    // Combine chunks into final response
     let response: ChatCompletionResponse | null = null;
     let fullContent = "";
 
-    const stream = new ReadableStream({
-      start: async (controller) => {
-        try {
-          this.agentManager.registerStream(requestId, controller);
-          this.logger.info(`Forwarding request to agent`, {
-            requestId,
-            agentId,
-          });
-          await this.agentRPCService.chat({
-            ...request,
-            agentId,
-            requestId,
-            stream: false,
-          });
-          this.logger.info(`Request forwarded to agent`, {
-            requestId,
-            agentId,
-          });
-        } catch (error) {
-          controller.error(error);
-          this.agentManager.removeStream(requestId);
+    for (const chunk of chunks) {
+      if (!response) {
+        // Initialize response from first chunk
+        response = {
+          id: chunk.id,
+          object: "chat.completion",
+          created: chunk.created,
+          model: chunk.model,
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+              },
+              logprobs: null,
+              finish_reason: "stop",
+            },
+          ],
+          usage: {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+          },
+        };
+      }
+
+      // Accumulate content from delta
+      if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta) {
+        if (chunk.choices[0].delta.content) {
+          fullContent += chunk.choices[0].delta.content;
         }
-      },
-      cancel: () => {
-        this.agentManager.removeStream(requestId);
-      },
-    });
-
-    const reader = stream.getReader();
-    const decoder = new TextDecoder();
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const text = decoder.decode(value, { stream: true });
-        const lines = text.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6).trim();
-            if (data === "[DONE]") continue;
-
-            try {
-              const chunk = JSON.parse(data);
-              if (!response) {
-                response = {
-                  id: chunk.id,
-                  object: "chat.completion",
-                  created: chunk.created,
-                  model: chunk.model,
-                  choices: [
-                    {
-                      index: 0,
-                      message: {
-                        role: "assistant",
-                        content: "",
-                      },
-                      logprobs: null,
-                      finish_reason: "stop",
-                    },
-                  ],
-                  usage: {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                  },
-                };
-              }
-
-              if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta) {
-                if (chunk.choices[0].delta.content) {
-                  fullContent += chunk.choices[0].delta.content;
-                }
-                if (
-                  chunk.choices[0].finish_reason &&
-                  response &&
-                  response.choices[0]
-                ) {
-                  response.choices[0].finish_reason =
-                    chunk.choices[0].finish_reason;
-                }
-              }
-            } catch (e) {
-              // Ignore parse errors
-            }
-          }
+        if (chunk.choices[0].finish_reason && response && response.choices[0]) {
+          response.choices[0].finish_reason = chunk.choices[0].finish_reason;
         }
       }
-    } finally {
-      reader.releaseLock();
     }
 
     if (!response) {

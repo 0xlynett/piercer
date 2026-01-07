@@ -6,6 +6,12 @@ export interface Agent {
   name: string;
 }
 
+interface CompletionBuffer {
+  chunks: any[];
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+}
+
 export class AgentManager {
   private agents: Map<string, Agent> = new Map();
   private loadedModels: Map<string, string[]> = new Map();
@@ -13,6 +19,7 @@ export class AgentManager {
   private pendingRequests: Map<string, number> = new Map();
   private activeStreams: Map<string, ReadableStreamDefaultController> =
     new Map();
+  private completionBuffers: Map<string, CompletionBuffer> = new Map();
 
   constructor(private db: Db, private logger: Logger) {}
 
@@ -30,6 +37,44 @@ export class AgentManager {
 
   removeStream(requestId: string): void {
     this.activeStreams.delete(requestId);
+  }
+
+  // Completion Buffer Management (for non-streaming requests)
+  registerCompletionBuffer(requestId: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      this.completionBuffers.set(requestId, {
+        chunks: [],
+        resolve,
+        reject,
+      });
+    });
+  }
+
+  getCompletionBuffer(requestId: string): CompletionBuffer | undefined {
+    return this.completionBuffers.get(requestId);
+  }
+
+  addChunkToBuffer(requestId: string, chunk: any): void {
+    const buffer = this.completionBuffers.get(requestId);
+    if (buffer) {
+      buffer.chunks.push(chunk);
+    }
+  }
+
+  resolveCompletionBuffer(requestId: string, result: any): void {
+    const buffer = this.completionBuffers.get(requestId);
+    if (buffer) {
+      buffer.resolve(result);
+      this.completionBuffers.delete(requestId);
+    }
+  }
+
+  rejectCompletionBuffer(requestId: string, error: any): void {
+    const buffer = this.completionBuffers.get(requestId);
+    if (buffer) {
+      buffer.reject(error);
+      this.completionBuffers.delete(requestId);
+    }
   }
 
   addAgent(id: string, name: string): void {
