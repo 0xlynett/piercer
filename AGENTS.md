@@ -43,13 +43,13 @@ An HTTP API from the controller that includes:
 
 Update this later.
 
-# agent-controller RPC Architecture
+# Agent-Controller RPC Architecture
 
-Piercer uses kkrpc for controller-agent communication.
+Piercer uses a bidirectional RPC library, @piercer/rpc (found in this repo) for controller-agent communication.
 
-## agent Identification
+## Agent Identification
 
-agents identify themselves via HTTP headers during WebSocket upgrade:
+Agents identify themselves via HTTP headers during WebSocket upgrade:
 
 - `agent-id` - The agent's unique identifier
 - `agent-name` - The agent's human-readable name

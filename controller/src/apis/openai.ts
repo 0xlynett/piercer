@@ -361,13 +361,6 @@ export class OpenAIAPIHandler {
         });
       }
 
-      // Create pending request in database
-      const pendingRequestId = this.db.addPendingRequest(
-        routingResult.agent.id,
-        "completion",
-        internalModel
-      );
-
       // Handle streaming vs non-streaming
       if (request.stream) {
         return this.handleStreamingCompletion(
@@ -379,23 +372,24 @@ export class OpenAIAPIHandler {
       }
 
       // Non-streaming completion
-      const response = await this.executeCompletion(
-        routingResult.agent.id,
-        request,
-        requestId
-      );
+      try {
+        const response = await this.executeCompletion(
+          routingResult.agent.id,
+          request,
+          requestId
+        );
 
-      // Update pending request status
-      this.db.updatePendingRequestStatus(pendingRequestId, "completed");
+        // Log completion
+        const duration = Date.now() - startTime;
+        this.logger.requestCompleted(requestId, duration, {
+          model: request.model,
+          tokens: response.usage.total_tokens,
+        });
 
-      // Log completion
-      const duration = Date.now() - startTime;
-      this.logger.requestCompleted(requestId, duration, {
-        model: request.model,
-        tokens: response.usage.total_tokens,
-      });
-
-      return c.json(response, 200);
+        return c.json(response, 200);
+      } finally {
+        // Cleanup is handled by agent manager in-memory tracking
+      }
     } catch (error) {
       return this.handleError(c, error, requestId);
     }
@@ -702,24 +696,11 @@ export class OpenAIAPIHandler {
           }
         );
 
-        try {
-          await this.agentRPCService.startModel({
-            agentId: routingResult.agent.id,
-            model: internalModel,
-          });
-          console.log("DEBUG after starting model");
-        } catch (error) {
-          console.error("Error starting model", error);
-        }
+        await this.agentRPCService.startModel({
+          agentId: routingResult.agent.id,
+          model: internalModel,
+        });
       }
-
-      // Create pending request in database
-      const pendingRequestId = this.db.addPendingRequest(
-        routingResult.agent.id,
-        "chat",
-        internalModel
-      );
-      console.log("DEBUG after adding pending request");
 
       // Handle streaming vs non-streaming
       if (request.stream) {
@@ -731,26 +712,25 @@ export class OpenAIAPIHandler {
         );
       }
 
-      console.log("DEBUG before execute chat completion");
-
       // Non-streaming chat completion
-      const response = await this.executeChatCompletion(
-        routingResult.agent.id,
-        request,
-        requestId
-      );
+      try {
+        const response = await this.executeChatCompletion(
+          routingResult.agent.id,
+          request,
+          requestId
+        );
 
-      // Update pending request status
-      this.db.updatePendingRequestStatus(pendingRequestId, "completed");
+        // Log completion
+        const duration = Date.now() - startTime;
+        this.logger.requestCompleted(requestId, duration, {
+          model: request.model,
+          tokens: response.usage.total_tokens,
+        });
 
-      // Log completion
-      const duration = Date.now() - startTime;
-      this.logger.requestCompleted(requestId, duration, {
-        model: request.model,
-        tokens: response.usage.total_tokens,
-      });
-
-      return c.json(response, 200);
+        return c.json(response, 200);
+      } finally {
+        // Cleanup is handled by agent manager in-memory tracking
+      }
     } catch (error) {
       return this.handleError(c, error, requestId);
     }
@@ -923,17 +903,14 @@ export class OpenAIAPIHandler {
   ): Promise<Response> {
     const stream = new ReadableStream({
       start: async (controller) => {
-        console.log("Stream started for requestId:", requestId);
         try {
           this.agentManager.registerStream(requestId, controller);
 
-          console.log("Calling agentRPCService.chat");
           await this.agentRPCService.chat({
             ...request,
             agentId,
             requestId,
           });
-          console.log("agentRPCService.chat called successfully");
         } catch (error) {
           const errorChunk = {
             error: {

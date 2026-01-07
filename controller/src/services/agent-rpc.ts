@@ -51,7 +51,6 @@ export class AgentRPCService {
     if (!this.rpc) throw new Error("RPC not initialized");
     const agentRpc = this.rpc.remote<AgentFunctions>(agentId);
     const result = await agentRpc.startModel({ model });
-    console.log("DEBUG after start model");
     result.models.forEach((m: string) => {
       this.agentManager.addLoadedModel(agentId, m);
     });

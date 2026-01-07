@@ -45,17 +45,11 @@ export class BunTransport extends EventEmitter implements Transport {
   }
 
   handleMessage(ws: WSContext, data: any) {
-    console.log("BunTransport handling message:", data);
     const clientId = this.wsToId.get(ws);
 
     // hono/ws doesn't expose anything to allow us to uniquely ID a client
     // as such we have to trust that clients don't know request IDs
 
-    /*if (!clientId) {
-      console.log("No client ID");
-      console.log(ws);
-      return;
-    }*/
     let parsed;
     try {
       parsed = typeof data === "string" ? JSON.parse(data) : data;
@@ -63,7 +57,6 @@ export class BunTransport extends EventEmitter implements Transport {
       console.error("Failed to parse message", e);
       return;
     }
-    console.log(`BunTransport received from ${clientId}:`, parsed);
     this.emit("message", parsed, clientId);
   }
 }

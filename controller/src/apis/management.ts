@@ -61,6 +61,13 @@ export class ManagementAPIHandler {
     const body = await c.req.json();
     const { model_url, filename } = body;
 
+    // Validate agent exists
+    const agent = this.agentManager.getAgent(agentId);
+    if (!agent) {
+      this.logger.warn(`Download request for non-existent agent: ${agentId}`);
+      return c.json({ error: `Agent '${agentId}' not found` }, 404);
+    }
+
     this.logger.info(
       `Download request for agent ${agentId}, model ${model_url} as ${filename}`
     );

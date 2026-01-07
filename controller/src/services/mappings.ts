@@ -145,12 +145,17 @@ export class ModelMappingsService implements MappingsService {
       return false;
     }
 
-    // Note: The database doesn't have a delete method, so we just clear from cache
-    // In a real implementation, you'd want to add a delete method to the database
-    this.cache.delete(publicName);
-    this.reverseCache.delete(mapping.internal_name);
+    // Delete from database
+    const deleted = this.db.removeModelMapping(publicName);
+    
+    if (deleted) {
+      // Clear from cache
+      this.cache.delete(publicName);
+      this.reverseCache.delete(mapping.internal_name);
+      return true;
+    }
 
-    return true;
+    return false;
   }
 
   /**
