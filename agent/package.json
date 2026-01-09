@@ -1,16 +1,24 @@
 {
   "name": "agent",
-  "module": "index.ts",
+  "version": "1.0.0",
   "type": "module",
   "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+  "scripts": {
+    "start": "node --env-file=.env --import tsx/esm index.ts",
+    "dev": "node --env-file=.env --watch --import tsx/esm index.ts"
   },
   "dependencies": {
     "@piercer/rpc": "workspace:*",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "node-llama-cpp": "^3.1.0",
+    "xml2js": "^0.6.2",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/xml2js": "^0.4.14",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
   }
 }
