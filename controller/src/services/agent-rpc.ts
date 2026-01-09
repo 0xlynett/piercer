@@ -84,9 +84,16 @@ export class AgentRPCService {
   public handleReceiveCompletion(params: any): void {
     const { requestId, data } = params;
 
+    const cleanup = () => {
+      const agentId = this.agentManager.unbindRequestFromAgent(requestId);
+      if (agentId) {
+        this.agentManager.decrementPendingRequests(agentId);
+      }
+    };
+
     // Check if this is a streaming request (has a stream controller)
     const streamController = this.agentManager.getStream(requestId);
-    
+
     // Check if this is a non-streaming request (has a completion buffer)
     const completionBuffer = this.agentManager.getCompletionBuffer(requestId);
 
@@ -102,6 +109,7 @@ export class AgentRPCService {
           streamController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
           streamController.close();
           this.agentManager.removeStream(requestId);
+          cleanup();
         } else {
           // Assume data is the chunk object
           const chunkData = `data: ${JSON.stringify(data)}\n\n`;
@@ -118,6 +126,7 @@ export class AgentRPCService {
           // Ignore error if stream is already closed
         }
         this.agentManager.removeStream(requestId);
+        cleanup();
       }
       return;
     }
@@ -131,6 +140,7 @@ export class AgentRPCService {
             requestId,
             completionBuffer.chunks
           );
+          cleanup();
         } else {
           // Accumulate chunk in the buffer
           this.agentManager.addChunkToBuffer(requestId, data);
@@ -141,6 +151,7 @@ export class AgentRPCService {
           error as Error
         );
         this.agentManager.rejectCompletionBuffer(requestId, error);
+        cleanup();
       }
     }
   }

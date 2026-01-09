@@ -17,6 +17,7 @@ export class AgentManager {
   private loadedModels: Map<string, string[]> = new Map();
   private installedModels: Map<string, string[]> = new Map();
   private pendingRequests: Map<string, number> = new Map();
+  private requestToAgent: Map<string, string> = new Map();
   private activeStreams: Map<string, ReadableStreamDefaultController> =
     new Map();
   private completionBuffers: Map<string, CompletionBuffer> = new Map();
@@ -91,6 +92,11 @@ export class AgentManager {
       this.loadedModels.delete(id);
       this.installedModels.delete(id);
       this.pendingRequests.delete(id);
+      for (const [requestId, agentId] of this.requestToAgent.entries()) {
+        if (agentId === id) {
+          this.requestToAgent.delete(requestId);
+        }
+      }
       this.db.updateAgentStatus(id, "disconnected");
       this.logger.info(`Agent disconnected: ${agent.name} (${id})`);
     }
@@ -145,5 +151,19 @@ export class AgentManager {
   decrementPendingRequests(agentId: string): void {
     const count = this.pendingRequests.get(agentId) || 0;
     this.pendingRequests.set(agentId, Math.max(0, count - 1));
+  }
+
+  bindRequestToAgent(requestId: string, agentId: string): void {
+    this.requestToAgent.set(requestId, agentId);
+  }
+
+  getAgentForRequest(requestId: string): string | undefined {
+    return this.requestToAgent.get(requestId);
+  }
+
+  unbindRequestFromAgent(requestId: string): string | undefined {
+    const agentId = this.requestToAgent.get(requestId);
+    this.requestToAgent.delete(requestId);
+    return agentId;
   }
 }

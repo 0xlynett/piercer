@@ -62,8 +62,8 @@ export class ModelMappingsService implements MappingsService {
       return dbMapping.internal_name;
     }
 
-    // If no mapping exists, assume the public name is also the internal name
-    return publicName;
+    // If no mapping exists, return null
+    return null;
   }
 
   /**

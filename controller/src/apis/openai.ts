@@ -514,6 +514,8 @@ export class OpenAIAPIHandler {
       start: async (controller) => {
         try {
           this.agentManager.registerStream(requestId, controller);
+          this.agentManager.bindRequestToAgent(requestId, agentId);
+          this.agentManager.incrementPendingRequests(agentId);
 
           await this.agentRPCService.completion({
             ...request,
@@ -532,6 +534,10 @@ export class OpenAIAPIHandler {
           );
           controller.error(error);
           this.agentManager.removeStream(requestId);
+          const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
+          if (boundAgent) {
+            this.agentManager.decrementPendingRequests(boundAgent);
+          }
         }
       },
       cancel: () => {
@@ -565,6 +571,9 @@ export class OpenAIAPIHandler {
       agentId,
     });
 
+    this.agentManager.bindRequestToAgent(requestId, agentId);
+    this.agentManager.incrementPendingRequests(agentId);
+
     // Call the agent RPC (fire and forget - results come via WebSocket)
     this.agentRPCService.completion({
       ...request,
@@ -574,6 +583,10 @@ export class OpenAIAPIHandler {
     }).catch((error) => {
       this.logger.error(`Error calling agent RPC for request ${requestId}`, error as Error);
       this.agentManager.rejectCompletionBuffer(requestId, error);
+      const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
+      if (boundAgent) {
+        this.agentManager.decrementPendingRequests(boundAgent);
+      }
     });
 
     // Wait for all chunks to be accumulated via WebSocket messages
@@ -905,6 +918,8 @@ export class OpenAIAPIHandler {
       start: async (controller) => {
         try {
           this.agentManager.registerStream(requestId, controller);
+          this.agentManager.bindRequestToAgent(requestId, agentId);
+          this.agentManager.incrementPendingRequests(agentId);
 
           await this.agentRPCService.chat({
             ...request,
@@ -923,6 +938,10 @@ export class OpenAIAPIHandler {
           );
           controller.error(error);
           this.agentManager.removeStream(requestId);
+          const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
+          if (boundAgent) {
+            this.agentManager.decrementPendingRequests(boundAgent);
+          }
         }
       },
       cancel: () => {
@@ -956,6 +975,9 @@ export class OpenAIAPIHandler {
       agentId,
     });
 
+    this.agentManager.bindRequestToAgent(requestId, agentId);
+    this.agentManager.incrementPendingRequests(agentId);
+
     // Call the agent RPC (fire and forget - results come via WebSocket)
     this.agentRPCService.chat({
       ...request,
@@ -965,6 +987,10 @@ export class OpenAIAPIHandler {
     }).catch((error) => {
       this.logger.error(`Error calling agent RPC for request ${requestId}`, error as Error);
       this.agentManager.rejectCompletionBuffer(requestId, error);
+      const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
+      if (boundAgent) {
+        this.agentManager.decrementPendingRequests(boundAgent);
+      }
     });
 
     // Wait for all chunks to be accumulated via WebSocket messages
