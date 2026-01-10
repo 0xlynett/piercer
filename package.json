@@ -12,6 +12,7 @@
   "workspaces": [
     "agent",
     "controller",
-    "rpc"
+    "rpc",
+    "piercer-cli"
   ]
 }

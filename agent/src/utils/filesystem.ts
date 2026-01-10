@@ -1,6 +1,15 @@
-import { readdir, readFile, writeFile, stat } from "fs/promises";
+import { readdir, readFile, writeFile, stat, mkdir } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
+
+/**
+ * Ensure a directory exists, creating it if necessary
+ */
+export async function ensureDirExists(dirPath: string): Promise<void> {
+  if (!existsSync(dirPath)) {
+    await mkdir(dirPath, { recursive: true });
+  }
+}
 
 /**
  * Get list of all model files in the models directory
@@ -55,6 +64,9 @@ export async function getModelSize(
  * Load agent ID from file, or generate new one
  */
 export async function loadOrGenerateAgentId(dataDir: string): Promise<string> {
+  // Ensure data directory exists
+  await ensureDirExists(dataDir);
+
   const idPath = join(dataDir, "agent-id.txt");
 
   try {

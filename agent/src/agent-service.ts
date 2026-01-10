@@ -13,6 +13,7 @@ import {
   listInstalledModels,
   getModelPath,
   modelExists,
+  ensureDirExists,
 } from "./utils/filesystem.js";
 import { logger } from "./utils/logger.js";
 import { ModelNotFoundError, ModelLoadError } from "./utils/errors.js";
@@ -50,6 +51,10 @@ export class AgentService {
    */
   async initialize(): Promise<void> {
     logger.info("Initializing agent service");
+
+    // Ensure required directories exist
+    await ensureDirExists(this.config.agentDataDir);
+    await ensureDirExists(this.config.modelsDir);
 
     // Load or generate agent ID
     this.agentId = await loadOrGenerateAgentId(this.config.agentDataDir);
