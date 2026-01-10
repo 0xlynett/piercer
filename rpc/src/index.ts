@@ -1,4 +1,5 @@
 import type { EventEmitter } from "events";
+export {WebSocketTransport} from "./ws-transport"
 
 export interface Transport extends EventEmitter {
   send(message: any, clientId?: string): void;
