@@ -17,8 +17,9 @@
   "scripts": {
     "agent": "node --env-file=.env --import tsx/esm agent",
     "controller": "bun ./controller",
-    "cli": "bun ./piercer-cli/bin/run.js",
-    "cli:build": "cd piercer-cli && bun run build"
+    "cli": "bun ./controller/cli",
+    "harness:create-dirs": "bun harness/create-agent-dirs.ts",
+    "harness:run": "bun harness/run-agents.ts"
   },
   "dependencies": {
     "tsx": "^4.21.0"
