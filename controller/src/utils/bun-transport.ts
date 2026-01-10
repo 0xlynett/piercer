@@ -44,6 +44,10 @@ export class BunTransport extends EventEmitter implements Transport {
     return this.wsToId.get(ws);
   }
 
+  getClient(agentId: string): WSContext | undefined {
+    return this.clients.get(agentId);
+  }
+
   handleMessage(ws: WSContext, data: any) {
     const clientId = this.wsToId.get(ws);
 

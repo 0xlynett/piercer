@@ -13,7 +13,7 @@ export interface AgentConfig {
 
 export function loadConfig(): AgentConfig {
   return {
-    controllerUrl: process.env.CONTROLLER_URL || "ws://localhost:4080/ws",
+    controllerUrl: process.env.CONTROLLER_URL_WS || "ws://localhost:4080/ws",
     agentSecretKey: process.env.AGENT_SECRET_KEY || "dev-secret-key",
     agentName: process.env.AGENT_NAME || "Agent-1",
     modelsDir: process.env.MODELS_DIR || "./models",

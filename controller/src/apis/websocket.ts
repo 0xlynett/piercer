@@ -93,14 +93,17 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
       return;
     }
 
-    // Check for duplicate agent ID
+    // Check for duplicate agent ID - kick out old one and accept new one
     if (this.connectedAgents.has(agentId)) {
-      this.logger.warn("Agent connection rejected: duplicate agent ID", {
-        agentId,
-        agentName,
-      });
-      ws.close(1008, "Agent ID already connected");
-      return;
+      const oldWs = this.transport.getClient(agentId);
+      if (oldWs) {
+        this.logger.info("Kicking out old agent connection", {
+          agentId,
+          oldAgentName: this.connectedAgents.get(agentId)?.name,
+          newAgentName: agentName,
+        });
+        oldWs.close(1001, "Replaced by new connection");
+      }
     }
 
     // Store agent info
