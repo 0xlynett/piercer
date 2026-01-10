@@ -122,12 +122,6 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
 
     // Log connection
     this.logger.agentConnected(agentId, agentName, installedModels);
-
-    this.logger.info("Agent connected", {
-      agentId,
-      agentName,
-      totalAgents: this.connectedAgents.size,
-    });
   }
 
   public handleDisconnection(

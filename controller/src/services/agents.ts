@@ -82,7 +82,7 @@ export class AgentManager {
     this.agents.set(id, { id, name });
     this.pendingRequests.set(id, 0);
     this.db.registerAgent(id, name);
-    this.logger.info(`Agent connected: ${name} (${id})`);
+    this.logger.info(`Agent added to agent manager: ${name} (${id})`);
   }
 
   removeAgent(id: string): void {

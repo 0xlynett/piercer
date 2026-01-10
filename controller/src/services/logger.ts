@@ -83,6 +83,14 @@ export class PinoLogger implements Logger {
           return { level: label };
         },
       },
+      transport: {
+        target: "pino-pretty",
+        options: {
+          colorize: true,
+          translateTime: "HH:MM:ss",
+          ignore: "pid,hostname",
+        },
+      },
     });
     this.context = options.context || {};
   }

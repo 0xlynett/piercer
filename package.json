@@ -14,5 +14,13 @@
     "controller",
     "rpc",
     "piercer-cli"
-  ]
+  ],
+  "scripts": {
+    "agent": "node --env-file=.env --import tsx/esm agent",
+    "controller": "bun ./controller",
+    "cli": "bun ./piercer-cli"
+  },
+  "dependencies": {
+    "tsx": "^4.21.0"
+  }
 }
