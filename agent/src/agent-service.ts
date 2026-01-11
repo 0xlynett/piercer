@@ -14,6 +14,7 @@ import {
   getModelPath,
   modelExists,
   ensureDirExists,
+  watchModelsFolder,
 } from "./utils/filesystem.js";
 import { logger } from "./utils/logger.js";
 import { ModelNotFoundError, ModelLoadError } from "./utils/errors.js";
@@ -25,6 +26,7 @@ export class AgentService {
   private processManager: ProcessManager;
   private modelDownloader: ModelDownloader;
   private controllerRPC: any = null; // Will be set from index.ts
+  private modelsWatcher: (() => void) | null = null;
 
   constructor(private config: AgentConfig) {
     this.hardwareMonitor = new HardwareMonitor();
@@ -115,7 +117,10 @@ export class AgentService {
         data: params.data,
       });
     } catch (error) {
-      logger.error({ error, requestId: params.requestId }, "Error forwarding chunk");
+      logger.error(
+        { error, requestId: params.requestId },
+        "Error forwarding chunk"
+      );
     }
   }
 
@@ -240,9 +245,33 @@ export class AgentService {
         params.filename
       );
       logger.info({ filename }, "Model downloaded successfully");
+
+      // Notify controller of updated model list
+      if (this.controllerRPC) {
+        try {
+          const installedModels = await this.getInstalledModels();
+          await this.controllerRPC.updateModels({
+            agentId: this.agentId,
+            models: installedModels,
+          });
+          logger.info(
+            { count: installedModels.length },
+            "Notified controller of model update"
+          );
+        } catch (notifyError) {
+          logger.error(
+            { error: notifyError },
+            "Failed to notify controller of model update"
+          );
+        }
+      }
+
       return { filename };
     } catch (error) {
-      logger.error({ error, filename: params.filename }, "Model download failed");
+      logger.error(
+        { error, filename: params.filename },
+        "Model download failed"
+      );
       throw error;
     }
   }
@@ -252,7 +281,10 @@ export class AgentService {
    */
   async completion(params: any): Promise<any> {
     const modelName = params.model;
-    logger.info({ modelName, requestId: params.requestId }, "Completion request");
+    logger.info(
+      { modelName, requestId: params.requestId },
+      "Completion request"
+    );
 
     // Ensure model is loaded
     if (!this.processManager.getProcess(modelName)) {
@@ -305,10 +337,50 @@ export class AgentService {
   }
 
   /**
+   * Start watching models folder for changes
+   */
+  async startWatching(): Promise<void> {
+    if (this.modelsWatcher) {
+      return; // Already watching
+    }
+
+    this.modelsWatcher = watchModelsFolder(
+      this.config.modelsDir,
+      async (models) => {
+        if (this.controllerRPC) {
+          try {
+            await this.controllerRPC.updateModels({
+              agentId: this.agentId,
+              models,
+            });
+            logger.info(
+              { modelCount: models.length },
+              "Notified controller of model changes"
+            );
+          } catch (error) {
+            logger.error(
+              { error },
+              "Failed to notify controller of model changes"
+            );
+          }
+        }
+      }
+    );
+
+    logger.info("Started watching models folder for changes");
+  }
+
+  /**
    * Shutdown agent service
    */
   async shutdown(): Promise<void> {
     logger.info("Shutting down agent service");
+
+    // Stop watching models folder
+    if (this.modelsWatcher) {
+      this.modelsWatcher();
+      this.modelsWatcher = null;
+    }
 
     this.hardwareMonitor.stopMonitoring();
     await this.processManager.shutdown();

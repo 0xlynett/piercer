@@ -36,5 +36,6 @@ export interface ControllerFunctions {
     requestId: string;
     data: any;
   }): void;
+  updateModels(params: { agentId: string; models: string[] }): void;
   [key: string]: Function;
 }

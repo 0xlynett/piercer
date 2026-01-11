@@ -1,6 +1,6 @@
 import { readdir, readFile, writeFile, stat, mkdir } from "fs/promises";
 import { join } from "path";
-import { existsSync } from "fs";
+import { existsSync, watch } from "fs";
 
 /**
  * Ensure a directory exists, creating it if necessary
@@ -15,7 +15,9 @@ export async function ensureDirExists(dirPath: string): Promise<void> {
  * Get list of all model files in the models directory
  * Filesystem is the source of truth - no database needed
  */
-export async function listInstalledModels(modelsDir: string): Promise<string[]> {
+export async function listInstalledModels(
+  modelsDir: string
+): Promise<string[]> {
   try {
     if (!existsSync(modelsDir)) {
       return [];
@@ -82,4 +84,58 @@ export async function loadOrGenerateAgentId(dataDir: string): Promise<string> {
   const newId = "agent-" + Math.random().toString(36).substring(2, 15);
   await writeFile(idPath, newId, "utf-8");
   return newId;
+}
+
+/**
+ * Watch models folder for additions, deletions, and renames
+ * Returns a cleanup function to stop watching
+ */
+export function watchModelsFolder(
+  modelsDir: string,
+  onChange: (models: string[]) => void
+): () => void {
+  const getModels = async (): Promise<string[]> => {
+    try {
+      if (!existsSync(modelsDir)) {
+        return [];
+      }
+      const files = await readdir(modelsDir);
+      return files.filter((f) => f.endsWith(".gguf") || f.endsWith(".ggml"));
+    } catch {
+      return [];
+    }
+  };
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const watcher = watch(modelsDir, (eventType, filename) => {
+    // Ignore events for non-model files
+    if (
+      filename &&
+      typeof filename === "string" &&
+      !filename.endsWith(".gguf") &&
+      !filename.endsWith(".ggml")
+    ) {
+      return;
+    }
+
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    debounceTimer = setTimeout(async () => {
+      const models = await getModels();
+      onChange(models);
+    }, 100);
+  });
+
+  // Initial load - notify with current models
+  getModels().then(onChange);
+
+  return () => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    watcher.close();
+  };
 }

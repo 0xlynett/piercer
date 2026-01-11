@@ -57,6 +57,8 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
       error: (params: any) => this.agentRPCService.handleAgentError(params),
       receiveCompletion: (params: any) =>
         this.agentRPCService.handleReceiveCompletion(params),
+      updateModels: (params: any) =>
+        this.agentRPCService.handleUpdateModels(params),
     };
   }
 

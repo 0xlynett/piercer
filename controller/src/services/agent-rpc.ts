@@ -81,6 +81,17 @@ export class AgentRPCService {
     });
   }
 
+  public handleUpdateModels(params: {
+    agentId: string;
+    models: string[];
+  }): void {
+    this.logger.info("Agent model update", {
+      agentId: params.agentId,
+      count: params.models.length,
+    });
+    this.agentManager.setInstalledModels(params.agentId, params.models);
+  }
+
   public handleReceiveCompletion(params: any): void {
     const { requestId, data } = params;
 
@@ -106,7 +117,9 @@ export class AgentRPCService {
     if (streamController) {
       try {
         if (data === "[DONE]") {
-          streamController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+          streamController.enqueue(
+            new TextEncoder().encode("data: [DONE]\n\n")
+          );
           streamController.close();
           this.agentManager.removeStream(requestId);
           cleanup();
