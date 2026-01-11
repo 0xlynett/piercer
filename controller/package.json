@@ -1,10 +1,10 @@
 {
-  "name": "controller",
+  "name": "@piercer/controller",
   "module": "src/index.ts",
   "type": "module",
   "private": true,
   "bin": {
-    "piercer": "./cli.ts"
+    "piercer-cli": "./cli.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
