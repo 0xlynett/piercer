@@ -41,8 +41,6 @@ An HTTP API from the controller that includes:
 - `DELETE /management/mappings/:publicName`: Deletes a model mapping.
 - `POST /management/agents/:agentId/models/download`: Triggers a model download on a specific agent. Requires `model_url` and `filename` in the request body.
 
-Use `hono/client` if sending a request to the Management API.
-
 # Agent-Controller RPC Architecture
 
 Piercer uses a bidirectional RPC library, @piercer/rpc (found in this repo) for controller-agent communication.

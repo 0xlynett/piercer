@@ -366,6 +366,7 @@ export class OpenAIAPIHandler {
         return this.handleStreamingCompletion(
           c,
           request,
+          internalModel,
           routingResult.agent.id,
           requestId
         );
@@ -376,6 +377,7 @@ export class OpenAIAPIHandler {
         const response = await this.executeCompletion(
           routingResult.agent.id,
           request,
+          internalModel,
           requestId
         );
 
@@ -507,6 +509,7 @@ export class OpenAIAPIHandler {
   private async handleStreamingCompletion(
     c: Context,
     request: CompletionRequest,
+    internalModel: string,
     agentId: string,
     requestId: string
   ) {
@@ -519,6 +522,7 @@ export class OpenAIAPIHandler {
 
           await this.agentRPCService.completion({
             ...request,
+            model: internalModel,
             agentId,
             requestId,
           });
@@ -562,6 +566,7 @@ export class OpenAIAPIHandler {
   private async executeCompletion(
     agentId: string,
     request: CompletionRequest,
+    internalModel: string,
     requestId: string
   ) {
     // Register a completion buffer and get the Promise
@@ -580,6 +585,7 @@ export class OpenAIAPIHandler {
     this.agentRPCService
       .completion({
         ...request,
+        model: internalModel,
         agentId,
         requestId,
         stream: false,
@@ -729,6 +735,7 @@ export class OpenAIAPIHandler {
         return this.handleStreamingChatCompletion(
           c,
           request,
+          internalModel,
           routingResult.agent.id,
           requestId
         );
@@ -739,6 +746,7 @@ export class OpenAIAPIHandler {
         const response = await this.executeChatCompletion(
           routingResult.agent.id,
           request,
+          internalModel,
           requestId
         );
 
@@ -920,6 +928,7 @@ export class OpenAIAPIHandler {
   private async handleStreamingChatCompletion(
     c: Context,
     request: ChatCompletionRequest,
+    internalModel: string,
     agentId: string,
     requestId: string
   ) {
@@ -932,6 +941,7 @@ export class OpenAIAPIHandler {
 
           await this.agentRPCService.chat({
             ...request,
+            model: internalModel,
             agentId,
             requestId,
           });
@@ -975,6 +985,7 @@ export class OpenAIAPIHandler {
   private async executeChatCompletion(
     agentId: string,
     request: ChatCompletionRequest,
+    internalModel: string,
     requestId: string
   ) {
     // Register a completion buffer and get the Promise
@@ -993,6 +1004,7 @@ export class OpenAIAPIHandler {
     this.agentRPCService
       .chat({
         ...request,
+        model: internalModel,
         agentId,
         requestId,
         stream: false,
