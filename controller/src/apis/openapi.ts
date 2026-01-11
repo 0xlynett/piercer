@@ -29,7 +29,8 @@ export const CompletionsRoute = createRoute({
   path: "/v1/completions",
   tags: ["OpenAI API"],
   summary: "Create a completion",
-  description: "Creates a completion for the given prompt using the specified model.",
+  description:
+    "Creates a completion for the given prompt using the specified model.",
   request: {
     body: {
       content: {
@@ -76,7 +77,8 @@ export const ChatCompletionsRoute = createRoute({
   path: "/v1/chat/completions",
   tags: ["OpenAI API"],
   summary: "Create a chat completion",
-  description: "Creates a chat completion for the given messages using the specified model.",
+  description:
+    "Creates a chat completion for the given messages using the specified model.",
   request: {
     body: {
       content: {
@@ -123,7 +125,8 @@ export const ListModelsRoute = createRoute({
   path: "/v1/models",
   tags: ["OpenAI API"],
   summary: "List available models",
-  description: "Returns a list of available models that can be used with the API.",
+  description:
+    "Returns a list of available models that can be used with the API.",
   responses: {
     200: {
       description: "Successful models list response",
@@ -169,7 +172,8 @@ export const ListMappingsRoute = createRoute({
   path: "/management/mappings",
   tags: ["Management"],
   summary: "List model mappings",
-  description: "Returns a list of all model mappings that translate public names to internal filenames.",
+  description:
+    "Returns a list of all model mappings that translate public names to internal filenames.",
   responses: {
     200: {
       description: "Successful mappings list response",
@@ -190,7 +194,8 @@ export const CreateMappingRoute = createRoute({
   path: "/management/mappings",
   tags: ["Management"],
   summary: "Create a model mapping",
-  description: "Creates a new model mapping that translates a public name to an internal filename.",
+  description:
+    "Creates a new model mapping that translates a public name to an internal filename.",
   request: {
     body: {
       content: {
@@ -232,7 +237,9 @@ export const DeleteMappingRoute = createRoute({
   description: "Deletes a model mapping by its public name.",
   request: {
     params: z.object({
-      publicName: z.string().openapi({ description: "Public name of the mapping to delete" }),
+      publicName: z
+        .string()
+        .openapi({ description: "Public name of the mapping to delete" }),
     }),
   },
   responses: {
@@ -263,10 +270,13 @@ export const DownloadModelRoute = createRoute({
   path: "/management/agents/{agentId}/models/download",
   tags: ["Management"],
   summary: "Download a model to an agent",
-  description: "Triggers a model download on a specific agent from the given URL.",
+  description:
+    "Triggers a model download on a specific agent from the given URL.",
   request: {
     params: z.object({
-      agentId: z.string().openapi({ description: "Agent ID to download the model to" }),
+      agentId: z
+        .string()
+        .openapi({ description: "Agent ID to download the model to" }),
     }),
     body: {
       content: {
@@ -363,7 +373,8 @@ export const OpenAPIInfo = {
   info: {
     title: "Piercer Controller API",
     version: "1.0.0",
-    description: "LLM request load balancer controller with OpenAI-compatible API",
+    description:
+      "LLM request load balancer controller with OpenAI-compatible API",
     contact: {
       name: "Piercer",
       url: "https://github.com/piercer/piercer",
@@ -450,6 +461,8 @@ export function createOpenAPIApp() {
 // Route Types
 // ============================================
 
+export type { OpenAPIHono } from "@hono/zod-openapi";
+
 export type CompletionsRoute = typeof CompletionsRoute;
 export type ChatCompletionsRoute = typeof ChatCompletionsRoute;
 export type ListModelsRoute = typeof ListModelsRoute;
@@ -460,3 +473,6 @@ export type DeleteMappingRoute = typeof DeleteMappingRoute;
 export type DownloadModelRoute = typeof DownloadModelRoute;
 export type HealthRoute = typeof HealthRoute;
 export type APIInfoRoute = typeof APIInfoRoute;
+
+// App type for hono client
+export type AppType = ReturnType<typeof createOpenAPIApp>;

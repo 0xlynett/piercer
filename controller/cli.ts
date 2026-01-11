@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import chalk from "chalk";
+import { hc } from "hono/client";
+import type { AppType } from "./src/apis/openapi";
 
 const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:3000";
 
@@ -8,37 +10,15 @@ function getBaseUrl(url: string): string {
   return url.replace(/\/$/, "");
 }
 
-async function fetchJson<T>(
-  url: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    try {
-      const errorJson = JSON.parse(errorText);
-      throw new Error(errorJson.message || errorJson.error || `HTTP ${response.status}`);
-    } catch {
-      throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
-    }
-  }
-
-  return response.json() as Promise<T>;
-}
-
 function handleError(fn: (...args: any[]) => Promise<void>) {
   return async (...args: any[]) => {
     try {
       await fn(...args);
     } catch (error) {
-      console.error(chalk.red("Error:"), error instanceof Error ? error.message : error);
+      console.error(
+        chalk.red("Error:"),
+        error instanceof Error ? error.message : error
+      );
       process.exit(1);
     }
   };
@@ -60,9 +40,13 @@ program
   .action(
     handleError(async () => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const data = await fetchJson<{ name: string; version: string }>(
-        `${baseUrl}/api/info`
-      );
+      const client = hc<AppType>(baseUrl);
+      const res = await client.api.info.$get();
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+      }
+      const data = await res.json();
       console.log(chalk.blue("Piercer Controller"));
       console.log(`Name: ${data.name}`);
       console.log(`Version: ${data.version}`);
@@ -75,9 +59,10 @@ program
   .action(
     handleError(async () => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const response = await fetch(`${baseUrl}/health`);
+      const client = hc<AppType>(baseUrl);
+      const res = await client.health.$get();
 
-      if (response.ok) {
+      if (res.ok) {
         console.log(chalk.green("✓ API is healthy"));
       } else {
         console.log(chalk.red("✗ API is unhealthy"));
@@ -88,9 +73,7 @@ program
 
 // Agents commands
 
-const agentsCommand = program
-  .command("agents")
-  .description("Manage agents");
+const agentsCommand = program.command("agents").description("Manage agents");
 
 agentsCommand
   .command("list")
@@ -98,14 +81,13 @@ agentsCommand
   .action(
     handleError(async () => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const agents = await fetchJson<Array<{
-        id: string;
-        name: string;
-        status: string;
-        models: string[];
-        pendingRequests: number;
-        vram?: { total: number; used: number };
-      }>>(`${baseUrl}/management/agents`);
+      const client = hc<AppType>(baseUrl);
+      const res = await client.management.agents.$get();
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+      }
+      const agents = await res.json();
 
       if (agents.length === 0) {
         console.log(chalk.yellow("No agents connected"));
@@ -122,11 +104,15 @@ agentsCommand
               chalk.white("Name:"),
               agent.name,
               chalk.white("Status:"),
-              agent.status === "connected" ? chalk.green(agent.status) : chalk.yellow(agent.status),
+              agent.status === "connected"
+                ? chalk.green(agent.status)
+                : chalk.yellow(agent.status),
               chalk.white("Models:"),
-              (agent.models?.length ?? 0) > 0 ? agent.models?.join(", ") || "none" : chalk.gray("none"),
+              (agent.loaded_models?.length ?? 0) > 0
+                ? agent.loaded_models?.join(", ") || "none"
+                : chalk.gray("none"),
               chalk.white("Pending:"),
-              String(agent.pendingRequests),
+              String(agent.pending_requests),
             ].join(" ")
           )
           .join("\n")
@@ -140,32 +126,37 @@ agentsCommand
   .action(
     handleError(async (agentId: string) => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const agent = await fetchJson<{
-        id: string;
-        name: string;
-        status: string;
-        models: string[];
-        pendingRequests: number;
-        vram?: { total: number; used: number };
-        system?: { cpu: number; memory: number };
-      }>(`${baseUrl}/management/agents/${agentId}`);
+      const client = hc<AppType>(baseUrl);
+      const res = await client.management.agents[agentId].$get();
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+      }
+      const agent = await res.json();
 
       console.log(chalk.blue(`Agent Details: ${agent.name}\n`));
       console.log(`${chalk.white("ID:")} ${agent.id}`);
       console.log(`${chalk.white("Status:")} ${agent.status}`);
-      console.log(`${chalk.white("Models:")} ${agent.models?.length > 0 ? agent.models?.join(", ") || "none" : chalk.gray("none")}`);
-      console.log(`${chalk.white("Pending Requests:")} ${agent.pendingRequests}`);
+      console.log(
+        `${chalk.white("Models:")} ${
+          agent.loaded_models?.length > 0
+            ? agent.loaded_models?.join(", ") || "none"
+            : chalk.gray("none")
+        }`
+      );
+      console.log(
+        `${chalk.white("Pending Requests:")} ${agent.pending_requests}`
+      );
 
-      if (agent.vram) {
-        const vramPercent = ((agent.vram.used / agent.vram.total) * 100).toFixed(1);
+      if (agent.vram_total && agent.vram_used) {
+        const vramPercent = (
+          (agent.vram_used / agent.vram_total) *
+          100
+        ).toFixed(1);
         console.log(
-          `${chalk.white("VRAM:")} ${(agent.vram.used / 1024).toFixed(1)}GB / ${(agent.vram.total / 1024).toFixed(1)}GB (${vramPercent}%)`
-        );
-      }
-
-      if (agent.system) {
-        console.log(
-          `${chalk.white("System:")} CPU ${agent.system.cpu}% | Memory ${(agent.system.memory / 1024).toFixed(1)}GB`
+          `${chalk.white("VRAM:")} ${(agent.vram_used / 1024).toFixed(
+            1
+          )}GB / ${(agent.vram_total / 1024).toFixed(1)}GB (${vramPercent}%)`
         );
       }
     })
@@ -183,9 +174,13 @@ mappingsCommand
   .action(
     handleError(async () => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const mappings = await fetchJson<Array<{ publicName: string; filename: string }>>(
-        `${baseUrl}/management/mappings`
-      );
+      const client = hc<AppType>(baseUrl);
+      const res = await client.management.mappings.$get();
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+      }
+      const mappings = await res.json();
 
       if (mappings.length === 0) {
         console.log(chalk.yellow("No model mappings configured"));
@@ -195,7 +190,7 @@ mappingsCommand
       console.log(chalk.blue(`Model Mappings (${mappings.length}):\n`));
       console.log(
         mappings
-          .map((m) => `${chalk.white(m.publicName)} → ${m.filename}`)
+          .map((m) => `${chalk.white(m.public_name)} → ${m.filename}`)
           .join("\n")
       );
     })
@@ -207,11 +202,17 @@ mappingsCommand
   .action(
     handleError(async (publicName: string, filename: string) => {
       const baseUrl = getBaseUrl(program.opts().url);
-      await fetchJson(`${baseUrl}/management/mappings`, {
-        method: "POST",
-        body: JSON.stringify({ publicName, filename }),
+      const client = hc<AppType>(baseUrl);
+      const res = await client.management.mappings.$post({
+        json: { public_name: publicName, filename },
       });
-      console.log(chalk.green(`✓ Mapping created: ${publicName} → ${filename}`));
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+      }
+      console.log(
+        chalk.green(`✓ Mapping created: ${publicName} → ${filename}`)
+      );
     })
   );
 
@@ -221,9 +222,14 @@ mappingsCommand
   .action(
     handleError(async (publicName: string) => {
       const baseUrl = getBaseUrl(program.opts().url);
-      await fetchJson(`${baseUrl}/management/mappings/${encodeURIComponent(publicName)}`, {
-        method: "DELETE",
-      });
+      const client = hc<AppType>(baseUrl);
+      const res = await client.management.mappings[
+        encodeURIComponent(publicName)
+      ].$delete();
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+      }
       console.log(chalk.green(`✓ Mapping removed: ${publicName}`));
     })
   );
@@ -236,16 +242,20 @@ program
   .action(
     handleError(async (agentId: string, modelUrl: string, filename: string) => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const result = await fetchJson<{ success: boolean; filename: string }>(
-        `${baseUrl}/management/agents/${agentId}/models/download`,
+      const client = hc<AppType>(baseUrl);
+      const res = await client.management.agents[agentId].models.download.$post(
         {
-          method: "POST",
-          body: JSON.stringify({ modelUrl, filename }),
+          json: { model_url: modelUrl, filename },
         }
       );
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+      }
+      const result = await res.json();
       console.log(chalk.green(`✓ Download started on agent ${agentId}`));
       console.log(`  URL: ${modelUrl}`);
-      console.log(`  Filename: ${result.filename}`);
+      console.log(`  Filename: ${result.result || filename}`);
     })
   );
 
