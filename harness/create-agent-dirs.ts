@@ -7,7 +7,7 @@
  * - A unique models directory (symlinked or separate)
  */
 
-import { mkdir, symlink, exists, rm } from "fs/promises";
+import { mkdir, symlink, exists, rm, lstat, unlink } from "fs/promises";
 import { join, resolve } from "path";
 import { cwd } from "process";
 
@@ -53,7 +53,13 @@ export async function createAgentDirs(
     const symlinkPath = join(agentDir, "models");
 
     if (await exists(symlinkPath)) {
-      await rm(symlinkPath);
+      // Check if it's a symlink and use unlink instead of rm to avoid EFAULT
+      const stats = await lstat(symlinkPath);
+      if (stats.isSymbolicLink()) {
+        await unlink(symlinkPath);
+      } else {
+        await rm(symlinkPath, { recursive: true, force: true });
+      }
     }
 
     await symlink(sharedPath, symlinkPath, "dir");
