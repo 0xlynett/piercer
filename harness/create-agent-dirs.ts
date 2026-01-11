@@ -4,17 +4,15 @@
  * Creates isolated data directories for multiple agents.
  * Each agent gets:
  * - A unique data directory for agent ID storage
- * - A unique models directory (symlinked or separate)
+ * - A unique models directory (can copy from shared models if specified)
  */
 
-import { mkdir, symlink, exists, rm, lstat, unlink } from "fs/promises";
+import { mkdir, exists, rm, copyFile, readdir } from "fs/promises";
 import { join, resolve } from "path";
-import { cwd } from "process";
 
 export interface AgentDirConfig {
   id: number;
   baseDir: string;
-  createModelsSymlink: boolean;
   sharedModelsDir?: string;
 }
 
@@ -47,23 +45,26 @@ export async function createAgentDirs(
   await mkdir(dataDir, { recursive: true });
   await mkdir(modelsDir, { recursive: true });
 
-  // Create symlink to shared models if configured
-  if (config.createModelsSymlink && config.sharedModelsDir) {
+  // Copy models from shared directory if specified
+  if (config.sharedModelsDir) {
     const sharedPath = resolve(config.sharedModelsDir);
-    const symlinkPath = join(agentDir, "models");
 
-    if (await exists(symlinkPath)) {
-      // Check if it's a symlink and use unlink instead of rm to avoid EFAULT
-      const stats = await lstat(symlinkPath);
-      if (stats.isSymbolicLink()) {
-        await unlink(symlinkPath);
-      } else {
-        await rm(symlinkPath, { recursive: true, force: true });
+    if (await exists(sharedPath)) {
+      console.log(`📦 Copying models from shared directory...`);
+
+      const files = await readdir(sharedPath, { withFileTypes: true });
+
+      for (const file of files) {
+        if (file.isFile()) {
+          const srcFile = join(sharedPath, file.name);
+          const destFile = join(modelsDir, file.name);
+          await copyFile(srcFile, destFile);
+          console.log(`   Copied ${file.name}`);
+        }
       }
+    } else {
+      console.log(`   Shared models directory does not exist, skipping copy`);
     }
-
-    await symlink(sharedPath, symlinkPath, "dir");
-    console.log(`🔗 Symlinked models directory to shared location`);
   }
 
   return {
@@ -80,18 +81,15 @@ export async function createMultiAgentDirs(
   agentCount: number,
   options: {
     baseDir?: string;
-    sharedModels?: boolean;
     sharedModelsDir?: string;
   } = {}
 ): Promise<CreatedAgentDirs[]> {
-  const {
-    baseDir = "./agent-data",
-    sharedModels = true,
-    sharedModelsDir = "./models",
-  } = options;
+  const { baseDir = "./agent-data", sharedModelsDir = "./models" } = options;
 
   console.log(`🚀 Creating ${agentCount} agent directories in ${baseDir}`);
-  console.log(`   Shared models: ${sharedModels ? "yes" : "no"}`);
+  if (sharedModelsDir) {
+    console.log(`   Shared models dir: ${sharedModelsDir}`);
+  }
   console.log("");
 
   const results: CreatedAgentDirs[] = [];
@@ -100,8 +98,7 @@ export async function createMultiAgentDirs(
     const config: AgentDirConfig = {
       id: i,
       baseDir,
-      createModelsSymlink: sharedModels,
-      sharedModelsDir: sharedModelsDir,
+      sharedModelsDir,
     };
 
     const created = await createAgentDirs(config);
@@ -135,8 +132,9 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const agentCount = parseInt(args[0] || "2", 10);
   const baseDir = args[1] || "./agent-data";
+  const sharedModelsDir = args[2] || "./models";
 
-  createMultiAgentDirs(agentCount, { baseDir })
+  createMultiAgentDirs(agentCount, { baseDir, sharedModelsDir })
     .then((dirs) => {
       console.log("\n📋 Environment variables for each agent:");
       dirs.forEach((dir) => {

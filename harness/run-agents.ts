@@ -1,6 +1,6 @@
 /**
  * Multi-Agent Harness - Agent Runner
- * 
+ *
  * Spawns multiple isolated agent processes with different configurations.
  * Each agent gets:
  * - Isolated data directory (for agent ID)
@@ -77,20 +77,25 @@ export class MultiAgentRunner {
     // Wait for all agents to be ready
     await Promise.all(
       this.pendingAgents.map(
-        (p) => new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error(`Agent ${p.id} failed to start within ${this.startupTimeout}ms`));
-          }, this.startupTimeout);
-          
-          p.resolve = () => {
-            clearTimeout(timeout);
-            resolve();
-          };
-          p.reject = (err) => {
-            clearTimeout(timeout);
-            reject(err);
-          };
-        })
+        (p) =>
+          new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(
+                new Error(
+                  `Agent ${p.id} failed to start within ${this.startupTimeout}ms`
+                )
+              );
+            }, this.startupTimeout);
+
+            p.resolve = () => {
+              clearTimeout(timeout);
+              resolve();
+            };
+            p.reject = (err) => {
+              clearTimeout(timeout);
+              reject(err);
+            };
+          })
       )
     );
 
@@ -120,7 +125,7 @@ export class MultiAgentRunner {
     // Create startup promise for this agent
     let resolveStartup: () => void;
     let rejectStartup: (err: Error) => void;
-    
+
     const startupPromise = new Promise<void>((resolve, reject) => {
       resolveStartup = () => resolve();
       rejectStartup = (err) => reject(err);
@@ -146,7 +151,7 @@ export class MultiAgentRunner {
 
     // Find the agent entry point
     const agentPath = resolve(join(__dirname, "..", "agent", "index.ts"));
-    
+
     // Spawn the agent using bun
     const childProcess = spawn("bun", ["run", agentPath], {
       env,
@@ -157,15 +162,21 @@ export class MultiAgentRunner {
     // Handle stdout
     childProcess.stdout?.on("data", (data) => {
       const lines = data.toString().trim().split("\n");
-      lines.forEach((line) => {
+      lines.forEach((line: string | string[]) => {
         if (quiet) {
-          if (line.includes("Agent initialized") || line.includes("Agent running")) {
+          if (
+            line.includes("Agent initialized") ||
+            line.includes("Agent running")
+          ) {
             console.log(`[Agent-${id}] ✅ Ready`);
             resolveStartup();
           }
         } else {
           console.log(`[Agent-${id}] ${line}`);
-          if (line.includes("Agent initialized") || line.includes("Agent running")) {
+          if (
+            line.includes("Agent initialized") ||
+            line.includes("Agent running")
+          ) {
             resolveStartup();
           }
         }
@@ -175,7 +186,7 @@ export class MultiAgentRunner {
     // Handle stderr
     childProcess.stderr?.on("data", (data) => {
       const lines = data.toString().trim().split("\n");
-      lines.forEach((line) => {
+      lines.forEach((line: string) => {
         if (line.trim()) {
           console.error(`[Agent-${id}] ERROR: ${line}`);
         }
