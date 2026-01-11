@@ -41,7 +41,7 @@ An HTTP API from the controller that includes:
 - `DELETE /management/mappings/:publicName`: Deletes a model mapping.
 - `POST /management/agents/:agentId/models/download`: Triggers a model download on a specific agent. Requires `model_url` and `filename` in the request body.
 
-This is fully typed using Hono, Zod and OpenAPI. Use `hono/client` if sending a request to the Management API.
+Use `hono/client` if sending a request to the Management API.
 
 # Agent-Controller RPC Architecture
 

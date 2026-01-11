@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { hc } from "hono/client";
-import type { AppType } from "./src/apis/openapi";
+import type { AppType } from "./src/index";
 
 const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:3000";
 
@@ -108,11 +108,11 @@ agentsCommand
                 ? chalk.green(agent.status)
                 : chalk.yellow(agent.status),
               chalk.white("Models:"),
-              (agent.loaded_models?.length ?? 0) > 0
-                ? agent.loaded_models?.join(", ") || "none"
+              (agent.loadedModels?.length ?? 0) > 0
+                ? agent.loadedModels?.join(", ") || "none"
                 : chalk.gray("none"),
               chalk.white("Pending:"),
-              String(agent.pending_requests),
+              String(agent.pendingRequests),
             ].join(" ")
           )
           .join("\n")
@@ -139,13 +139,13 @@ agentsCommand
       console.log(`${chalk.white("Status:")} ${agent.status}`);
       console.log(
         `${chalk.white("Models:")} ${
-          agent.loaded_models?.length > 0
-            ? agent.loaded_models?.join(", ") || "none"
+          agent.loadedModels?.length > 0
+            ? agent.loadedModels?.join(", ") || "none"
             : chalk.gray("none")
         }`
       );
       console.log(
-        `${chalk.white("Pending Requests:")} ${agent.pending_requests}`
+        `${chalk.white("Pending Requests:")} ${agent.pendingRequests}`
       );
 
       if (agent.vram_total && agent.vram_used) {
@@ -190,7 +190,7 @@ mappingsCommand
       console.log(chalk.blue(`Model Mappings (${mappings.length}):\n`));
       console.log(
         mappings
-          .map((m) => `${chalk.white(m.public_name)} → ${m.filename}`)
+          .map((m) => `${chalk.white(m.public_name)} → ${m.internal_name}`)
           .join("\n")
       );
     })

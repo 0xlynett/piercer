@@ -216,7 +216,7 @@ export class OpenAIAPIHandler {
   /**
    * API key validation middleware
    */
-  validateAPIKey(): (c: Context, next: Next) => Promise<Response | void> {
+  validateAPIKey() {
     return async (c: Context, next: Next) => {
       // Skip if no API key is configured
       if (!this.apiKey) {
@@ -250,7 +250,7 @@ export class OpenAIAPIHandler {
   /**
    * Rate limiting middleware
    */
-  rateLimit(): (c: Context, next: Next) => Promise<Response | void> {
+  rateLimit() {
     return async (c: Context, next: Next) => {
       const ip =
         c.req.header("X-Forwarded-For") ||
@@ -281,7 +281,7 @@ export class OpenAIAPIHandler {
   /**
    * Request ID middleware
    */
-  addRequestId(): (c: Context, next: Next) => Promise<void> {
+  addRequestId() {
     return async (c: Context, next: Next) => {
       const requestId = c.req.header("X-Request-ID") || randomUUID();
       c.set("requestId", requestId);
@@ -297,7 +297,7 @@ export class OpenAIAPIHandler {
   /**
    * Handle legacy completions API requests
    */
-  async handleCompletions(c: Context): Promise<Response> {
+  async handleCompletions(c: Context) {
     const requestId = c.get("requestId") as string;
     const startTime = Date.now();
 
@@ -509,7 +509,7 @@ export class OpenAIAPIHandler {
     request: CompletionRequest,
     agentId: string,
     requestId: string
-  ): Promise<Response> {
+  ) {
     const stream = new ReadableStream({
       start: async (controller) => {
         try {
@@ -534,7 +534,8 @@ export class OpenAIAPIHandler {
           );
           controller.error(error);
           this.agentManager.removeStream(requestId);
-          const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
+          const boundAgent =
+            this.agentManager.unbindRequestFromAgent(requestId);
           if (boundAgent) {
             this.agentManager.decrementPendingRequests(boundAgent);
           }
@@ -562,9 +563,10 @@ export class OpenAIAPIHandler {
     agentId: string,
     request: CompletionRequest,
     requestId: string
-  ): Promise<CompletionResponse> {
+  ) {
     // Register a completion buffer and get the Promise
-    const completionPromise = this.agentManager.registerCompletionBuffer(requestId);
+    const completionPromise =
+      this.agentManager.registerCompletionBuffer(requestId);
 
     this.logger.info(`Forwarding non-streaming completion request to agent`, {
       requestId,
@@ -575,24 +577,31 @@ export class OpenAIAPIHandler {
     this.agentManager.incrementPendingRequests(agentId);
 
     // Call the agent RPC (fire and forget - results come via WebSocket)
-    this.agentRPCService.completion({
-      ...request,
-      agentId,
-      requestId,
-      stream: false,
-    }).catch((error) => {
-      this.logger.error(`Error calling agent RPC for request ${requestId}`, error as Error);
-      this.agentManager.rejectCompletionBuffer(requestId, error);
-      const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
-      if (boundAgent) {
-        this.agentManager.decrementPendingRequests(boundAgent);
-      }
-    });
+    this.agentRPCService
+      .completion({
+        ...request,
+        agentId,
+        requestId,
+        stream: false,
+      })
+      .catch((error) => {
+        this.logger.error(
+          `Error calling agent RPC for request ${requestId}`,
+          error as Error
+        );
+        this.agentManager.rejectCompletionBuffer(requestId, error);
+        const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
+        if (boundAgent) {
+          this.agentManager.decrementPendingRequests(boundAgent);
+        }
+      });
 
     // Wait for all chunks to be accumulated via WebSocket messages
     const chunks = await completionPromise;
 
-    this.logger.info(`Received ${chunks.length} chunks for completion request ${requestId}`);
+    this.logger.info(
+      `Received ${chunks.length} chunks for completion request ${requestId}`
+    );
 
     // Combine chunks into final response
     let response: CompletionResponse | null = null;
@@ -650,7 +659,7 @@ export class OpenAIAPIHandler {
   /**
    * Handle chat completions API requests
    */
-  async handleChatCompletions(c: Context): Promise<Response> {
+  async handleChatCompletions(c: Context) {
     const requestId = c.get("requestId") as string;
     const startTime = Date.now();
 
@@ -913,7 +922,7 @@ export class OpenAIAPIHandler {
     request: ChatCompletionRequest,
     agentId: string,
     requestId: string
-  ): Promise<Response> {
+  ) {
     const stream = new ReadableStream({
       start: async (controller) => {
         try {
@@ -938,7 +947,8 @@ export class OpenAIAPIHandler {
           );
           controller.error(error);
           this.agentManager.removeStream(requestId);
-          const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
+          const boundAgent =
+            this.agentManager.unbindRequestFromAgent(requestId);
           if (boundAgent) {
             this.agentManager.decrementPendingRequests(boundAgent);
           }
@@ -966,9 +976,10 @@ export class OpenAIAPIHandler {
     agentId: string,
     request: ChatCompletionRequest,
     requestId: string
-  ): Promise<ChatCompletionResponse> {
+  ) {
     // Register a completion buffer and get the Promise
-    const completionPromise = this.agentManager.registerCompletionBuffer(requestId);
+    const completionPromise =
+      this.agentManager.registerCompletionBuffer(requestId);
 
     this.logger.info(`Forwarding non-streaming request to agent`, {
       requestId,
@@ -979,24 +990,31 @@ export class OpenAIAPIHandler {
     this.agentManager.incrementPendingRequests(agentId);
 
     // Call the agent RPC (fire and forget - results come via WebSocket)
-    this.agentRPCService.chat({
-      ...request,
-      agentId,
-      requestId,
-      stream: false,
-    }).catch((error) => {
-      this.logger.error(`Error calling agent RPC for request ${requestId}`, error as Error);
-      this.agentManager.rejectCompletionBuffer(requestId, error);
-      const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
-      if (boundAgent) {
-        this.agentManager.decrementPendingRequests(boundAgent);
-      }
-    });
+    this.agentRPCService
+      .chat({
+        ...request,
+        agentId,
+        requestId,
+        stream: false,
+      })
+      .catch((error) => {
+        this.logger.error(
+          `Error calling agent RPC for request ${requestId}`,
+          error as Error
+        );
+        this.agentManager.rejectCompletionBuffer(requestId, error);
+        const boundAgent = this.agentManager.unbindRequestFromAgent(requestId);
+        if (boundAgent) {
+          this.agentManager.decrementPendingRequests(boundAgent);
+        }
+      });
 
     // Wait for all chunks to be accumulated via WebSocket messages
     const chunks = await completionPromise;
 
-    this.logger.info(`Received ${chunks.length} chunks for request ${requestId}`);
+    this.logger.info(
+      `Received ${chunks.length} chunks for request ${requestId}`
+    );
 
     // Combine chunks into final response
     let response: ChatCompletionResponse | null = null;
@@ -1058,7 +1076,7 @@ export class OpenAIAPIHandler {
   /**
    * Handle models API requests
    */
-  async handleModels(c: Context): Promise<Response> {
+  async handleModels(c: Context) {
     const requestId = c.get("requestId") as string;
 
     try {

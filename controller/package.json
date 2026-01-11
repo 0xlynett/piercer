@@ -13,7 +13,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@hono/zod-openapi": "^1.2.0",
     "@piercer/rpc": "workspace:*",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
