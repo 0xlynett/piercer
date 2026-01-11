@@ -103,6 +103,8 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
           newAgentName: agentName,
         });
         oldWs.close(1001, "Replaced by new connection");
+
+        this.agentManager.removeAgent(agentId);
       }
     }
 

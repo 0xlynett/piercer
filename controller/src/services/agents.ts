@@ -4,6 +4,9 @@ import type { Logger } from "./logger";
 export interface Agent {
   id: string;
   name: string;
+  loadedModels: string[];
+  installedModels: string[];
+  pendingRequests: number;
 }
 
 interface CompletionBuffer {
@@ -14,9 +17,6 @@ interface CompletionBuffer {
 
 export class AgentManager {
   private agents: Map<string, Agent> = new Map();
-  private loadedModels: Map<string, string[]> = new Map();
-  private installedModels: Map<string, string[]> = new Map();
-  private pendingRequests: Map<string, number> = new Map();
   private requestToAgent: Map<string, string> = new Map();
   private activeStreams: Map<string, ReadableStreamDefaultController> =
     new Map();
@@ -79,8 +79,13 @@ export class AgentManager {
   }
 
   addAgent(id: string, name: string): void {
-    this.agents.set(id, { id, name });
-    this.pendingRequests.set(id, 0);
+    this.agents.set(id, {
+      id,
+      name,
+      loadedModels: [],
+      installedModels: [],
+      pendingRequests: 0,
+    });
     this.db.registerAgent(id, name);
     this.logger.info(`Agent added to agent manager: ${name} (${id})`);
   }
@@ -89,9 +94,6 @@ export class AgentManager {
     const agent = this.agents.get(id);
     if (agent) {
       this.agents.delete(id);
-      this.loadedModels.delete(id);
-      this.installedModels.delete(id);
-      this.pendingRequests.delete(id);
       for (const [requestId, agentId] of this.requestToAgent.entries()) {
         if (agentId === id) {
           this.requestToAgent.delete(requestId);
@@ -111,46 +113,56 @@ export class AgentManager {
   }
 
   getLoadedModels(agentId: string): string[] {
-    return this.loadedModels.get(agentId) || [];
+    const agent = this.agents.get(agentId);
+    return agent?.loadedModels || [];
   }
 
   addLoadedModel(agentId: string, modelName: string): void {
-    const models = this.loadedModels.get(agentId) || [];
-    if (!models.includes(modelName)) {
-      models.push(modelName);
-      this.loadedModels.set(agentId, models);
+    const agent = this.agents.get(agentId);
+    if (agent && !agent.loadedModels.includes(modelName)) {
+      agent.loadedModels.push(modelName);
     }
   }
 
   removeLoadedModel(agentId: string, modelName: string): void {
-    const models = this.loadedModels.get(agentId) || [];
-    const index = models.indexOf(modelName);
-    if (index !== -1) {
-      models.splice(index, 1);
-      this.loadedModels.set(agentId, models);
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      const index = agent.loadedModels.indexOf(modelName);
+      if (index !== -1) {
+        agent.loadedModels.splice(index, 1);
+      }
     }
   }
 
   getInstalledModels(agentId: string): string[] {
-    return this.installedModels.get(agentId) || [];
+    const agent = this.agents.get(agentId);
+    return agent?.installedModels || [];
   }
 
   setInstalledModels(agentId: string, modelNames: string[]): void {
-    this.installedModels.set(agentId, modelNames);
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      agent.installedModels = modelNames;
+    }
   }
 
   getPendingRequests(agentId: string): number {
-    return this.pendingRequests.get(agentId) || 0;
+    const agent = this.agents.get(agentId);
+    return agent?.pendingRequests || 0;
   }
 
   incrementPendingRequests(agentId: string): void {
-    const count = this.pendingRequests.get(agentId) || 0;
-    this.pendingRequests.set(agentId, count + 1);
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      agent.pendingRequests++;
+    }
   }
 
   decrementPendingRequests(agentId: string): void {
-    const count = this.pendingRequests.get(agentId) || 0;
-    this.pendingRequests.set(agentId, Math.max(0, count - 1));
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      agent.pendingRequests = Math.max(0, agent.pendingRequests - 1);
+    }
   }
 
   bindRequestToAgent(requestId: string, agentId: string): void {

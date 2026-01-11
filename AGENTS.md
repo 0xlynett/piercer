@@ -55,7 +55,7 @@ Agents identify themselves via HTTP headers during WebSocket upgrade:
 - `agent-name` - The agent's human-readable name
 - `Authorization` - Bearer token matching `AGENT_SECRET_KEY` (if configured)
 
-If two agents of the same ID connect the controller, it should always reject the newer agent.
+If two agents of the same ID connect the controller, it should kick out the older agent and accept the newer one.
 
 ## Message Format
 

@@ -32,6 +32,12 @@ describe("AgentRPCService", () => {
       removeStream: mock(),
       setInstalledModels: mock(),
       addLoadedModel: mock(),
+      unbindRequestFromAgent: mock(),
+      decrementPendingRequests: mock(),
+      getCompletionBuffer: mock(),
+      resolveCompletionBuffer: mock(),
+      rejectCompletionBuffer: mock(),
+      addChunkToBuffer: mock(),
     } as unknown as AgentManager;
 
     // Mock RPC
@@ -61,6 +67,9 @@ describe("AgentRPCService", () => {
   describe("receiveCompletion", () => {
     test("should write data to the correct stream", () => {
       (agentManager.getStream as any).mockReturnValue(mockStreamController);
+      (agentManager.unbindRequestFromAgent as any).mockReturnValue(
+        "test-agent"
+      );
 
       const params = {
         requestId: "req-123",
@@ -79,6 +88,9 @@ describe("AgentRPCService", () => {
 
     test("should close stream on [DONE]", () => {
       (agentManager.getStream as any).mockReturnValue(mockStreamController);
+      (agentManager.unbindRequestFromAgent as any).mockReturnValue(
+        "test-agent"
+      );
 
       const params = {
         requestId: "req-123",
@@ -90,10 +102,14 @@ describe("AgentRPCService", () => {
       expect(mockStreamController.enqueue).toHaveBeenCalled(); // Should write data: [DONE]
       expect(mockStreamController.close).toHaveBeenCalled();
       expect(agentManager.removeStream).toHaveBeenCalledWith("req-123");
+      expect(agentManager.decrementPendingRequests).toHaveBeenCalledWith(
+        "test-agent"
+      );
     });
 
     test("should handle missing streams gracefully (log warning)", () => {
       (agentManager.getStream as any).mockReturnValue(undefined);
+      (agentManager.getCompletionBuffer as any).mockReturnValue(undefined);
 
       const params = {
         requestId: "unknown-req",
@@ -108,6 +124,9 @@ describe("AgentRPCService", () => {
 
     test("should handle errors when writing to stream", () => {
       (agentManager.getStream as any).mockReturnValue(mockStreamController);
+      (agentManager.unbindRequestFromAgent as any).mockReturnValue(
+        "test-agent"
+      );
       mockStreamController.enqueue.mockImplementation(() => {
         throw new Error("Stream error");
       });

@@ -10,7 +10,6 @@
 
 import { spawn, ChildProcess } from "child_process";
 import { join, resolve } from "path";
-import * as readline from "readline";
 
 export interface AgentProcess {
   id: number;
@@ -18,7 +17,6 @@ export interface AgentProcess {
   dataDir: string;
   modelsDir: string;
   name: string;
-  startupPromise: Promise<void>;
 }
 
 export interface RunAgentsOptions {
@@ -30,19 +28,11 @@ export interface RunAgentsOptions {
   quiet?: boolean;
 }
 
-interface PendingAgent {
-  id: number;
-  resolve: () => void;
-  reject: (err: Error) => void;
-}
-
 /**
  * Run multiple agents as child processes
  */
 export class MultiAgentRunner {
   private agents: Map<number, AgentProcess> = new Map();
-  private pendingAgents: PendingAgent[] = [];
-  private startupTimeout = 30000; // 30 seconds per agent
   private isShuttingDown = false;
 
   constructor(private options: RunAgentsOptions) {}
@@ -50,7 +40,7 @@ export class MultiAgentRunner {
   /**
    * Start all agents
    */
-  async start(): Promise<void> {
+  start(): void {
     const {
       agentCount,
       baseDir = "./agent-data",
@@ -66,7 +56,7 @@ export class MultiAgentRunner {
 
     // Start all agents
     for (let i = 1; i <= agentCount; i++) {
-      await this.startAgent(i, {
+      this.startAgent(i, {
         baseDir,
         controllerUrl,
         agentSecretKey,
@@ -74,40 +64,13 @@ export class MultiAgentRunner {
       });
     }
 
-    // Wait for all agents to be ready
-    await Promise.all(
-      this.pendingAgents.map(
-        (p) =>
-          new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              reject(
-                new Error(
-                  `Agent ${p.id} failed to start within ${this.startupTimeout}ms`
-                )
-              );
-            }, this.startupTimeout);
-
-            p.resolve = () => {
-              clearTimeout(timeout);
-              resolve();
-            };
-            p.reject = (err) => {
-              clearTimeout(timeout);
-              reject(err);
-            };
-          })
-      )
-    );
-
-    this.pendingAgents = [];
-
-    console.log(`✅ All ${agentCount} agents started successfully`);
+    console.log(`✅ All ${agentCount} agents started`);
   }
 
   /**
    * Start a single agent process
    */
-  private async startAgent(
+  private startAgent(
     id: number,
     options: {
       baseDir: string;
@@ -115,27 +78,12 @@ export class MultiAgentRunner {
       agentSecretKey: string;
       quiet: boolean;
     }
-  ): Promise<void> {
+  ): void {
     const { baseDir, controllerUrl, agentSecretKey, quiet } = options;
 
     const dataDir = join(baseDir, String(id), "data");
     const modelsDir = join(baseDir, String(id), "models");
     const agentName = `Agent-${id}`;
-
-    // Create startup promise for this agent
-    let resolveStartup: () => void;
-    let rejectStartup: (err: Error) => void;
-
-    const startupPromise = new Promise<void>((resolve, reject) => {
-      resolveStartup = () => resolve();
-      rejectStartup = (err) => reject(err);
-    });
-
-    this.pendingAgents.push({
-      id,
-      resolve: resolveStartup!,
-      reject: rejectStartup!,
-    });
 
     // Build environment for this agent
     const env = {
@@ -162,32 +110,18 @@ export class MultiAgentRunner {
     // Handle stdout
     childProcess.stdout?.on("data", (data) => {
       const lines = data.toString().trim().split("\n");
-      lines.forEach((line: string | string[]) => {
-        if (quiet) {
-          if (
-            line.includes("Agent initialized") ||
-            line.includes("Agent running")
-          ) {
-            console.log(`[Agent-${id}] ✅ Ready`);
-            resolveStartup();
-          }
-        } else {
+      lines.forEach((line: string) => {
+        if (line.trim()) {
           console.log(`[Agent-${id}] ${line}`);
-          if (
-            line.includes("Agent initialized") ||
-            line.includes("Agent running")
-          ) {
-            resolveStartup();
-          }
         }
       });
     });
 
-    // Handle stderr
+    // Handle stderr (pino-pretty logs to stderr by default)
     childProcess.stderr?.on("data", (data) => {
       const lines = data.toString().trim().split("\n");
       lines.forEach((line: string) => {
-        if (line.trim()) {
+        if (line.trim() && !quiet) {
           console.error(`[Agent-${id}] ERROR: ${line}`);
         }
       });
@@ -197,14 +131,12 @@ export class MultiAgentRunner {
     childProcess.on("exit", (code) => {
       if (!this.isShuttingDown) {
         console.error(`[Agent-${id}] Process exited with code ${code}`);
-        rejectStartup(new Error(`Agent ${id} exited with code ${code}`));
       }
     });
 
     // Handle process error
     childProcess.on("error", (err) => {
       console.error(`[Agent-${id}] Process error:`, err);
-      rejectStartup(err);
     });
 
     // Store agent info
@@ -214,11 +146,10 @@ export class MultiAgentRunner {
       dataDir,
       modelsDir,
       name: agentName,
-      startupPromise,
     });
 
     if (!quiet) {
-      console.log(`[Agent-${id}] Starting... (data=${dataDir})`);
+      console.log(`[Agent-${id}] Started (data=${dataDir})`);
     }
   }
 
@@ -319,24 +250,18 @@ if (require.main === module) {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 
-  try {
-    await runner.start();
+  runner.start();
 
-    // Keep running until interrupted
-    console.log("\n📋 Agents running. Press Ctrl+C to stop.\n");
+  // Keep running until interrupted
+  console.log("\n📋 Agents running. Press Ctrl+C to stop.\n");
 
-    // Periodic health check
-    setInterval(async () => {
-      const healthy = await runner.healthCheck();
-      if (!healthy) {
-        console.error("⚠️  One or more agents has stopped unexpectedly");
-        await runner.stop();
-        process.exit(1);
-      }
-    }, 5000);
-  } catch (err) {
-    console.error("Error starting agents:", err);
-    await runner.stop();
-    process.exit(1);
-  }
+  // Periodic health check
+  setInterval(async () => {
+    const healthy = await runner.healthCheck();
+    if (!healthy) {
+      console.error("⚠️  One or more agents has stopped unexpectedly");
+      await runner.stop();
+      process.exit(1);
+    }
+  }, 5000);
 }
