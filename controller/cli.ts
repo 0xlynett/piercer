@@ -1,13 +1,55 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import chalk from "chalk";
-import { hc } from "hono/client";
-import type { AppType } from "./src/index";
 
 const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:3000";
 
+// Type definitions for API responses
+interface ControllerInfo {
+  name: string;
+  version: string;
+}
+
+interface Agent {
+  id: string;
+  name: string;
+  loadedModels: string[];
+  installedModels: string[];
+  pendingRequests: number;
+  status?: string;
+  vram_used?: number;
+  vram_total?: number;
+}
+
+interface ModelMapping {
+  public_name: string;
+  internal_name: string;
+}
+
 function getBaseUrl(url: string): string {
   return url.replace(/\/$/, "");
+}
+
+async function request<T>(
+  baseUrl: string,
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const url = `${baseUrl}${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+  }
+
+  return res.json() as Promise<T>;
 }
 
 function handleError(fn: (...args: any[]) => Promise<void>) {
@@ -40,13 +82,7 @@ program
   .action(
     handleError(async () => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const client = hc<AppType>(baseUrl);
-      const res = await client.api.info.$get();
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
-      }
-      const data = await res.json();
+      const data = await request<ControllerInfo>(baseUrl, "/api/info");
       console.log(chalk.blue("Piercer Controller"));
       console.log(`Name: ${data.name}`);
       console.log(`Version: ${data.version}`);
@@ -59,8 +95,8 @@ program
   .action(
     handleError(async () => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const client = hc<AppType>(baseUrl);
-      const res = await client.health.$get();
+      const url = `${baseUrl}/health`;
+      const res = await fetch(url);
 
       if (res.ok) {
         console.log(chalk.green("✓ API is healthy"));
@@ -81,13 +117,7 @@ agentsCommand
   .action(
     handleError(async () => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const client = hc<AppType>(baseUrl);
-      const res = await client.management.agents.$get();
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
-      }
-      const agents = await res.json();
+      const agents = await request<Agent[]>(baseUrl, "/management/agents");
 
       if (agents.length === 0) {
         console.log(chalk.yellow("No agents connected"));
@@ -95,28 +125,29 @@ agentsCommand
       }
 
       console.log(chalk.blue(`Connected agents (${agents.length}):\n`));
-      console.log(
-        agents
-          .map((agent) =>
-            [
-              chalk.white("ID:"),
-              agent.id,
-              chalk.white("Name:"),
-              agent.name,
-              chalk.white("Status:"),
-              agent.status === "connected"
-                ? chalk.green(agent.status)
-                : chalk.yellow(agent.status),
-              chalk.white("Models:"),
-              (agent.loadedModels?.length ?? 0) > 0
-                ? agent.loadedModels?.join(", ") || "none"
-                : chalk.gray("none"),
-              chalk.white("Pending:"),
-              String(agent.pendingRequests),
-            ].join(" ")
-          )
-          .join("\n")
+
+      const text = agents.map((agent) =>
+        [
+          chalk.white("ID:"),
+          chalk.magenta(agent.id),
+          chalk.yellow(`(${agent.name})`),
+          "\n  ",
+          chalk.white("Loaded:"),
+          (agent.loadedModels?.length ?? 0) > 0
+            ? agent.loadedModels?.join(", ") || "none"
+            : chalk.gray("none"),
+          "\n  ",
+          chalk.white("Installed:"),
+          (agent.installedModels?.length ?? 0) > 0
+            ? agent.installedModels?.join(", ") || "none"
+            : chalk.gray("none"),
+          "\n  ",
+          chalk.white("Pending requests:"),
+          String(agent.pendingRequests),
+        ].join(" ")
       );
+
+      text.forEach((t) => console.log(t));
     })
   );
 
@@ -126,17 +157,13 @@ agentsCommand
   .action(
     handleError(async (agentId: string) => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const client = hc<AppType>(baseUrl);
-      const res = await client.management.agents[agentId].$get();
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
-      }
-      const agent = await res.json();
+      const agent = await request<Agent>(
+        baseUrl,
+        `/management/agents/${encodeURIComponent(agentId)}`
+      );
 
       console.log(chalk.blue(`Agent Details: ${agent.name}\n`));
       console.log(`${chalk.white("ID:")} ${agent.id}`);
-      console.log(`${chalk.white("Status:")} ${agent.status}`);
       console.log(
         `${chalk.white("Models:")} ${
           agent.loadedModels?.length > 0
@@ -174,13 +201,10 @@ mappingsCommand
   .action(
     handleError(async () => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const client = hc<AppType>(baseUrl);
-      const res = await client.management.mappings.$get();
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
-      }
-      const mappings = await res.json();
+      const mappings = await request<ModelMapping[]>(
+        baseUrl,
+        "/management/mappings"
+      );
 
       if (mappings.length === 0) {
         console.log(chalk.yellow("No model mappings configured"));
@@ -202,14 +226,10 @@ mappingsCommand
   .action(
     handleError(async (publicName: string, filename: string) => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const client = hc<AppType>(baseUrl);
-      const res = await client.management.mappings.$post({
-        json: { public_name: publicName, filename },
+      await request(baseUrl, "/management/mappings", {
+        method: "POST",
+        body: JSON.stringify({ public_name: publicName, filename }),
       });
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
-      }
       console.log(
         chalk.green(`✓ Mapping created: ${publicName} → ${filename}`)
       );
@@ -222,14 +242,11 @@ mappingsCommand
   .action(
     handleError(async (publicName: string) => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const client = hc<AppType>(baseUrl);
-      const res = await client.management.mappings[
-        encodeURIComponent(publicName)
-      ].$delete();
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
-      }
+      await request(
+        baseUrl,
+        `/management/mappings/${encodeURIComponent(publicName)}`,
+        { method: "DELETE" }
+      );
       console.log(chalk.green(`✓ Mapping removed: ${publicName}`));
     })
   );
@@ -242,17 +259,14 @@ program
   .action(
     handleError(async (agentId: string, modelUrl: string, filename: string) => {
       const baseUrl = getBaseUrl(program.opts().url);
-      const client = hc<AppType>(baseUrl);
-      const res = await client.management.agents[agentId].models.download.$post(
+      const result = await request<{ result?: string }>(
+        baseUrl,
+        `/management/agents/${encodeURIComponent(agentId)}/models/download`,
         {
-          json: { model_url: modelUrl, filename },
+          method: "POST",
+          body: JSON.stringify({ model_url: modelUrl, filename }),
         }
       );
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
-      }
-      const result = await res.json();
       console.log(chalk.green(`✓ Download started on agent ${agentId}`));
       console.log(`  URL: ${modelUrl}`);
       console.log(`  Filename: ${result.result || filename}`);
