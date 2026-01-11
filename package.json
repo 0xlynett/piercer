@@ -12,8 +12,7 @@
   "workspaces": [
     "agent",
     "controller",
-    "rpc",
-    "packages/agent-harness"
+    "rpc"
   ],
   "scripts": {
     "agent": "node --env-file=.env --import tsx/esm agent",

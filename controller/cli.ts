@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import chalk from "chalk";
+import OpenAI from "openai";
 
 const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:3000";
 
@@ -232,6 +233,64 @@ program
       console.log(chalk.green(`✓ Download started on agent ${agentId}`));
       console.log(`  URL: ${modelUrl}`);
       console.log(`  Filename: ${result.result || filename}`);
+    })
+  );
+
+// Chat completion command
+
+program
+  .command("chat <model> <message>")
+  .description("Send a chat completion request")
+  .action(
+    handleError(async (model: string, message: string) => {
+      const baseUrl = getBaseUrl(program.opts().url);
+      const openai = new OpenAI({
+        baseURL: `${baseUrl}/v1`,
+        apiKey: process.env.API_KEY,
+      });
+
+      console.log(chalk.gray(`Sending chat request to model: ${model}...`));
+
+      const stream = await openai.chat.completions.create({
+        model,
+        messages: [{ role: "user", content: message }],
+        stream: true,
+      });
+
+      for await (const chunk of stream) {
+        process.stdout.write(chunk.choices[0]?.delta?.content || "");
+      }
+      process.stdout.write("\n");
+    })
+  );
+
+// Completion command
+
+program
+  .command("complete <model> <prompt>")
+  .description("Send a text completion request")
+  .action(
+    handleError(async (model: string, prompt: string) => {
+      const baseUrl = getBaseUrl(program.opts().url);
+      const openai = new OpenAI({
+        baseURL: `${baseUrl}/v1`,
+        apiKey: process.env.API_KEY,
+      });
+
+      console.log(
+        chalk.gray(`Sending completion request to model: ${model}...`)
+      );
+
+      const stream = await openai.completions.create({
+        model,
+        prompt,
+        stream: true,
+      });
+
+      for await (const chunk of stream) {
+        process.stdout.write(chunk.choices[0]?.text || "");
+      }
+      process.stdout.write("\n");
     })
   );
 
