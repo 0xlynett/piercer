@@ -151,44 +151,6 @@ agentsCommand
     })
   );
 
-agentsCommand
-  .command("info <agentId>")
-  .description("Get detailed info for a specific agent")
-  .action(
-    handleError(async (agentId: string) => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      const agent = await request<Agent>(
-        baseUrl,
-        `/management/agents/${encodeURIComponent(agentId)}`
-      );
-
-      console.log(chalk.blue(`Agent Details: ${agent.name}\n`));
-      console.log(`${chalk.white("ID:")} ${agent.id}`);
-      console.log(
-        `${chalk.white("Models:")} ${
-          agent.loadedModels?.length > 0
-            ? agent.loadedModels?.join(", ") || "none"
-            : chalk.gray("none")
-        }`
-      );
-      console.log(
-        `${chalk.white("Pending Requests:")} ${agent.pendingRequests}`
-      );
-
-      if (agent.vram_total && agent.vram_used) {
-        const vramPercent = (
-          (agent.vram_used / agent.vram_total) *
-          100
-        ).toFixed(1);
-        console.log(
-          `${chalk.white("VRAM:")} ${(agent.vram_used / 1024).toFixed(
-            1
-          )}GB / ${(agent.vram_total / 1024).toFixed(1)}GB (${vramPercent}%)`
-        );
-      }
-    })
-  );
-
 // Model Mappings commands
 
 const mappingsCommand = program
