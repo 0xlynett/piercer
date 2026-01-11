@@ -1,14 +1,12 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "crypto";
 
-// Data types
-export interface Agent {
+// Data types - Agent registry only (status/capabilities are in-memory)
+export interface AgentRegistry {
   id: string;
   name: string;
-  status: "connected" | "disconnected" | "busy" | "idle";
-  capabilities: string[];
+  first_seen: number;
   last_seen: number;
-  created_at: number;
 }
 
 export interface ModelMapping {
@@ -20,12 +18,11 @@ export interface ModelMapping {
 
 // Database Service Interface
 export interface Db {
-  // Agent operations
-  registerAgent(id: string, name: string, capabilities?: string[]): void;
-  updateAgentStatus(id: string, status: Agent["status"]): void;
-  getAgent(id: string): Agent | null;
-  getAllAgents(): Agent[];
-  getConnectedAgents(): Agent[];
+  // Agent registry operations (only stores id, name, timestamps)
+  registerAgent(id: string, name: string): void;
+  updateAgentLastSeen(id: string): void;
+  getAgent(id: string): AgentRegistry | null;
+  getAllAgents(): AgentRegistry[];
 
   // Model mapping operations
   addModelMapping(internalName: string, publicName: string): string;
@@ -48,15 +45,13 @@ export class BunDatabase implements Db {
   }
 
   private initializeSchema(): void {
-    // Create agents table
+    // Create agents registry table (only stores id, name, timestamps)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'disconnected',
-        capabilities TEXT NOT NULL DEFAULT '[]',
-        last_seen INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL
+        first_seen INTEGER NOT NULL,
+        last_seen INTEGER NOT NULL
       )
     `);
 
@@ -69,42 +64,34 @@ export class BunDatabase implements Db {
         created_at INTEGER NOT NULL
       )
     `);
-
-    // Create indexes for better performance
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
-    `);
   }
 
-  // Agent operations
-  registerAgent(id: string, name: string, capabilities: string[] = []): void {
-    const stmt = this.db.prepare(`
-      INSERT OR IGNORE INTO agents (id, name, status, capabilities, last_seen, created_at)
-      VALUES (?, ?, 'connected', ?, ?, ?)
+  // Agent registry operations
+  registerAgent(id: string, name: string): void {
+    const now = Date.now();
+
+    // Insert new agent or ignore if exists
+    const insertStmt = this.db.prepare(`
+      INSERT OR IGNORE INTO agents (id, name, first_seen, last_seen)
+      VALUES (?, ?, ?, ?)
     `);
+    insertStmt.run(id, name, now, now);
 
-    stmt.run(id, name, JSON.stringify(capabilities), Date.now(), Date.now());
-
-    // Update status and last_seen if agent already exists
+    // Update last_seen if agent already exists
     const updateStmt = this.db.prepare(`
-      UPDATE agents
-      SET status = 'connected', last_seen = ?
-      WHERE id = ?
+      UPDATE agents SET last_seen = ? WHERE id = ?
     `);
-    updateStmt.run(Date.now(), id);
+    updateStmt.run(now, id);
   }
 
-  updateAgentStatus(id: string, status: Agent["status"]): void {
+  updateAgentLastSeen(id: string): void {
     const stmt = this.db.prepare(`
-      UPDATE agents
-      SET status = ?, last_seen = ?
-      WHERE id = ?
+      UPDATE agents SET last_seen = ? WHERE id = ?
     `);
-
-    stmt.run(status, Date.now(), id);
+    stmt.run(Date.now(), id);
   }
 
-  getAgent(id: string): Agent | null {
+  getAgent(id: string): AgentRegistry | null {
     const stmt = this.db.prepare(`SELECT * FROM agents WHERE id = ?`);
     const row = stmt.get(id) as any;
 
@@ -113,40 +100,20 @@ export class BunDatabase implements Db {
     return {
       id: row.id,
       name: row.name,
-      status: row.status,
-      capabilities: JSON.parse(row.capabilities),
+      first_seen: row.first_seen,
       last_seen: row.last_seen,
-      created_at: row.created_at,
     };
   }
 
-  getAllAgents(): Agent[] {
+  getAllAgents(): AgentRegistry[] {
     const stmt = this.db.prepare(`SELECT * FROM agents ORDER BY id`);
     const rows = stmt.all() as any[];
 
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
-      status: row.status,
-      capabilities: JSON.parse(row.capabilities),
+      first_seen: row.first_seen,
       last_seen: row.last_seen,
-      created_at: row.created_at,
-    }));
-  }
-
-  getConnectedAgents(): Agent[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM agents WHERE status = 'connected' ORDER BY id`
-    );
-    const rows = stmt.all() as any[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      status: row.status,
-      capabilities: JSON.parse(row.capabilities),
-      last_seen: row.last_seen,
-      created_at: row.created_at,
     }));
   }
 
@@ -204,11 +171,8 @@ export class BunDatabase implements Db {
   cleanupOldRecords(maxAge: number = 24 * 60 * 60 * 1000): void {
     const cutoff = Date.now() - maxAge;
 
-    // Mark disconnected agents as offline if they haven't been seen for a while
-    this.db.exec(
-      `UPDATE agents SET status = 'disconnected' WHERE last_seen < ? AND status = 'connected'`,
-      [cutoff]
-    );
+    // Remove agents not seen for a while
+    this.db.exec(`DELETE FROM agents WHERE last_seen < ?`, [cutoff]);
   }
 
   close(): void {

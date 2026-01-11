@@ -99,7 +99,6 @@ export class AgentManager {
           this.requestToAgent.delete(requestId);
         }
       }
-      this.db.updateAgentStatus(id, "disconnected");
       this.logger.info(`Agent disconnected: ${agent.name} (${id})`);
     }
   }

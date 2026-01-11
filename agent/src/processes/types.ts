@@ -3,7 +3,7 @@ import type { RPC } from "@piercer/rpc";
 /**
  * RPC interface exposed by the inference child process
  */
-export interface InferenceProcessFunctions {
+export type InferenceProcessFunctions = {
   loadModel(params: { modelPath: string; contextSize: number }): Promise<{
     success: boolean;
     error?: string;
@@ -12,16 +12,16 @@ export interface InferenceProcessFunctions {
   chat(params: ChatParams): Promise<void>; // Streams via receiveChunk
   unloadModel(): Promise<{ success: boolean }>;
   shutdown(): Promise<void>;
-}
+};
 
 /**
  * RPC interface exposed by main process for child to call back
  */
-export interface MainProcessFunctions {
+export type MainProcessFunctions = {
   receiveChunk(params: { requestId: string; data: any }): Promise<void>;
   receiveComplete(params: { requestId: string; data?: any }): Promise<void>;
   receiveError(params: { requestId: string; error: any }): Promise<void>;
-}
+};
 
 export interface CompletionParams {
   requestId: string;

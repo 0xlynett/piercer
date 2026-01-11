@@ -329,7 +329,7 @@ app.post("/management/agents/:agentId/models/download", (c) => {
 // OpenAPI JSON documentation endpoint
 app.get("/openapi.json", (c) => {
   const baseURL = `http://${config.host}:${config.port}`;
-  
+
   const openapiSpec = {
     ...OpenAPIInfo,
     servers: [
@@ -343,7 +343,8 @@ app.get("/openapi.json", (c) => {
         post: {
           tags: ["OpenAI API"],
           summary: "Create a completion",
-          description: "Creates a completion for the given prompt using the specified model.",
+          description:
+            "Creates a completion for the given prompt using the specified model.",
           operationId: "createCompletion",
           requestBody: {
             required: true,
@@ -393,7 +394,8 @@ app.get("/openapi.json", (c) => {
         post: {
           tags: ["OpenAI API"],
           summary: "Create a chat completion",
-          description: "Creates a chat completion for the given messages using the specified model.",
+          description:
+            "Creates a chat completion for the given messages using the specified model.",
           operationId: "createChatCompletion",
           requestBody: {
             required: true,
@@ -443,7 +445,8 @@ app.get("/openapi.json", (c) => {
         get: {
           tags: ["OpenAI API"],
           summary: "List available models",
-          description: "Returns a list of available models that can be used with the API.",
+          description:
+            "Returns a list of available models that can be used with the API.",
           operationId: "listModels",
           responses: {
             "200": {
@@ -503,7 +506,8 @@ app.get("/openapi.json", (c) => {
         get: {
           tags: ["Management"],
           summary: "List connected agents",
-          description: "Returns a list of all connected agents and their status.",
+          description:
+            "Returns a list of all connected agents and their status.",
           operationId: "listAgents",
           responses: {
             "200": {
@@ -526,7 +530,8 @@ app.get("/openapi.json", (c) => {
         get: {
           tags: ["Management"],
           summary: "List model mappings",
-          description: "Returns a list of all model mappings that translate public names to internal filenames.",
+          description:
+            "Returns a list of all model mappings that translate public names to internal filenames.",
           operationId: "listMappings",
           responses: {
             "200": {
@@ -547,7 +552,8 @@ app.get("/openapi.json", (c) => {
         post: {
           tags: ["Management"],
           summary: "Create a model mapping",
-          description: "Creates a new model mapping that translates a public name to an internal filename.",
+          description:
+            "Creates a new model mapping that translates a public name to an internal filename.",
           operationId: "createMapping",
           requestBody: {
             required: true,
@@ -627,7 +633,8 @@ app.get("/openapi.json", (c) => {
         post: {
           tags: ["Management"],
           summary: "Download a model to an agent",
-          description: "Triggers a model download on a specific agent from the given URL.",
+          description:
+            "Triggers a model download on a specific agent from the given URL.",
           operationId: "downloadModel",
           parameters: [
             {
@@ -690,7 +697,10 @@ app.get("/openapi.json", (c) => {
           type: "object",
           required: ["model", "prompt"],
           properties: {
-            model: { type: "string", description: "Model to use for completion" },
+            model: {
+              type: "string",
+              description: "Model to use for completion",
+            },
             prompt: {
               oneOf: [
                 { type: "string" },
@@ -698,12 +708,34 @@ app.get("/openapi.json", (c) => {
               ],
               description: "Prompt to complete",
             },
-            max_tokens: { type: "integer", minimum: 0, description: "Maximum tokens to generate" },
-            temperature: { type: "number", minimum: 0, maximum: 2, description: "Sampling temperature" },
-            top_p: { type: "number", minimum: 0, maximum: 1, description: "Top-p sampling" },
-            n: { type: "integer", minimum: 1, maximum: 10, description: "Number of completions" },
+            max_tokens: {
+              type: "integer",
+              minimum: 0,
+              description: "Maximum tokens to generate",
+            },
+            temperature: {
+              type: "number",
+              minimum: 0,
+              maximum: 2,
+              description: "Sampling temperature",
+            },
+            top_p: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Top-p sampling",
+            },
+            n: {
+              type: "integer",
+              minimum: 1,
+              maximum: 10,
+              description: "Number of completions",
+            },
             stream: { type: "boolean", description: "Stream results" },
-            logprobs: { type: "boolean", description: "Return log probabilities" },
+            logprobs: {
+              type: "boolean",
+              description: "Return log probabilities",
+            },
             echo: { type: "boolean", description: "Echo prompt" },
             stop: {
               oneOf: [
@@ -712,10 +744,27 @@ app.get("/openapi.json", (c) => {
               ],
               description: "Stop sequences",
             },
-            presence_penalty: { type: "number", minimum: -2, maximum: 2, description: "Presence penalty" },
-            frequency_penalty: { type: "number", minimum: -2, maximum: 2, description: "Frequency penalty" },
-            best_of: { type: "integer", description: "Generate best_of completions" },
-            logit_bias: { type: "object", additionalProperties: { type: "number" }, description: "Logit bias for tokens" },
+            presence_penalty: {
+              type: "number",
+              minimum: -2,
+              maximum: 2,
+              description: "Presence penalty",
+            },
+            frequency_penalty: {
+              type: "number",
+              minimum: -2,
+              maximum: 2,
+              description: "Frequency penalty",
+            },
+            best_of: {
+              type: "integer",
+              description: "Generate best_of completions",
+            },
+            logit_bias: {
+              type: "object",
+              additionalProperties: { type: "number" },
+              description: "Logit bias for tokens",
+            },
             user: { type: "string", description: "User identifier" },
           },
         },
@@ -723,7 +772,11 @@ app.get("/openapi.json", (c) => {
           type: "object",
           properties: {
             id: { type: "string", description: "Completion ID" },
-            object: { type: "string", enum: ["text_completion"], description: "Object type" },
+            object: {
+              type: "string",
+              enum: ["text_completion"],
+              description: "Object type",
+            },
             created: { type: "integer", description: "Creation timestamp" },
             model: { type: "string", description: "Model used" },
             choices: {
@@ -733,16 +786,29 @@ app.get("/openapi.json", (c) => {
                 properties: {
                   index: { type: "integer", description: "Choice index" },
                   text: { type: "string", description: "Generated text" },
-                  logprobs: { type: "object", nullable: true, description: "Log probabilities" },
-                  finish_reason: { type: "string", description: "Reason for finishing" },
+                  logprobs: {
+                    type: "object",
+                    nullable: true,
+                    description: "Log probabilities",
+                  },
+                  finish_reason: {
+                    type: "string",
+                    description: "Reason for finishing",
+                  },
                 },
               },
             },
             usage: {
               type: "object",
               properties: {
-                prompt_tokens: { type: "integer", description: "Tokens in prompt" },
-                completion_tokens: { type: "integer", description: "Tokens in completion" },
+                prompt_tokens: {
+                  type: "integer",
+                  description: "Tokens in prompt",
+                },
+                completion_tokens: {
+                  type: "integer",
+                  description: "Tokens in completion",
+                },
                 total_tokens: { type: "integer", description: "Total tokens" },
               },
             },
@@ -764,34 +830,66 @@ app.get("/openapi.json", (c) => {
                 type: "object",
                 properties: {
                   id: { type: "string", description: "Tool call ID" },
-                  type: { type: "string", enum: ["function"], description: "Tool call type" },
+                  type: {
+                    type: "string",
+                    enum: ["function"],
+                    description: "Tool call type",
+                  },
                   function: {
                     type: "object",
                     properties: {
                       name: { type: "string", description: "Function name" },
-                      arguments: { type: "string", description: "Function arguments" },
+                      arguments: {
+                        type: "string",
+                        description: "Function arguments",
+                      },
                     },
                   },
                 },
               },
             },
-            tool_call_id: { type: "string", description: "Tool call response ID" },
+            tool_call_id: {
+              type: "string",
+              description: "Tool call response ID",
+            },
           },
         },
         ChatCompletionRequest: {
           type: "object",
           required: ["model", "messages"],
           properties: {
-            model: { type: "string", description: "Model to use for chat completion" },
+            model: {
+              type: "string",
+              description: "Model to use for chat completion",
+            },
             messages: {
               type: "array",
               items: { $ref: "#/components/schemas/ChatMessage" },
               description: "Conversation messages",
             },
-            max_tokens: { type: "integer", minimum: 0, description: "Maximum tokens to generate" },
-            temperature: { type: "number", minimum: 0, maximum: 2, description: "Sampling temperature" },
-            top_p: { type: "number", minimum: 0, maximum: 1, description: "Top-p sampling" },
-            n: { type: "integer", minimum: 1, maximum: 10, description: "Number of completions" },
+            max_tokens: {
+              type: "integer",
+              minimum: 0,
+              description: "Maximum tokens to generate",
+            },
+            temperature: {
+              type: "number",
+              minimum: 0,
+              maximum: 2,
+              description: "Sampling temperature",
+            },
+            top_p: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Top-p sampling",
+            },
+            n: {
+              type: "integer",
+              minimum: 1,
+              maximum: 10,
+              description: "Number of completions",
+            },
             stream: { type: "boolean", description: "Stream results" },
             stop: {
               oneOf: [
@@ -800,10 +898,26 @@ app.get("/openapi.json", (c) => {
               ],
               description: "Stop sequences",
             },
-            presence_penalty: { type: "number", minimum: -2, maximum: 2, description: "Presence penalty" },
-            frequency_penalty: { type: "number", minimum: -2, maximum: 2, description: "Frequency penalty" },
-            logprobs: { type: "boolean", description: "Return log probabilities" },
-            top_logprobs: { type: "integer", description: "Number of top logprobs" },
+            presence_penalty: {
+              type: "number",
+              minimum: -2,
+              maximum: 2,
+              description: "Presence penalty",
+            },
+            frequency_penalty: {
+              type: "number",
+              minimum: -2,
+              maximum: 2,
+              description: "Frequency penalty",
+            },
+            logprobs: {
+              type: "boolean",
+              description: "Return log probabilities",
+            },
+            top_logprobs: {
+              type: "integer",
+              description: "Number of top logprobs",
+            },
             user: { type: "string", description: "User identifier" },
           },
         },
@@ -811,7 +925,11 @@ app.get("/openapi.json", (c) => {
           type: "object",
           properties: {
             id: { type: "string", description: "Completion ID" },
-            object: { type: "string", enum: ["chat.completion"], description: "Object type" },
+            object: {
+              type: "string",
+              enum: ["chat.completion"],
+              description: "Object type",
+            },
             created: { type: "integer", description: "Creation timestamp" },
             model: { type: "string", description: "Model used" },
             choices: {
@@ -820,17 +938,33 @@ app.get("/openapi.json", (c) => {
                 type: "object",
                 properties: {
                   index: { type: "integer", description: "Choice index" },
-                  message: { $ref: "#/components/schemas/ChatMessage", description: "Response message" },
-                  logprobs: { type: "object", nullable: true, description: "Log probabilities" },
-                  finish_reason: { type: "string", description: "Reason for finishing" },
+                  message: {
+                    $ref: "#/components/schemas/ChatMessage",
+                    description: "Response message",
+                  },
+                  logprobs: {
+                    type: "object",
+                    nullable: true,
+                    description: "Log probabilities",
+                  },
+                  finish_reason: {
+                    type: "string",
+                    description: "Reason for finishing",
+                  },
                 },
               },
             },
             usage: {
               type: "object",
               properties: {
-                prompt_tokens: { type: "integer", description: "Tokens in prompt" },
-                completion_tokens: { type: "integer", description: "Tokens in completion" },
+                prompt_tokens: {
+                  type: "integer",
+                  description: "Tokens in prompt",
+                },
+                completion_tokens: {
+                  type: "integer",
+                  description: "Tokens in completion",
+                },
                 total_tokens: { type: "integer", description: "Total tokens" },
               },
             },
@@ -839,15 +973,26 @@ app.get("/openapi.json", (c) => {
         ModelsResponse: {
           type: "object",
           properties: {
-            object: { type: "string", enum: ["list"], description: "Object type" },
+            object: {
+              type: "string",
+              enum: ["list"],
+              description: "Object type",
+            },
             data: {
               type: "array",
               items: {
                 type: "object",
                 properties: {
                   id: { type: "string", description: "Model ID" },
-                  object: { type: "string", enum: ["model"], description: "Object type" },
-                  created: { type: "integer", description: "Creation timestamp" },
+                  object: {
+                    type: "string",
+                    enum: ["model"],
+                    description: "Object type",
+                  },
+                  created: {
+                    type: "integer",
+                    description: "Creation timestamp",
+                  },
                   owned_by: { type: "string", description: "Model owner" },
                 },
               },
@@ -861,11 +1006,23 @@ app.get("/openapi.json", (c) => {
             name: { type: "string", description: "Agent human-readable name" },
             status: {
               type: "string",
-              enum: ["connected", "disconnected", "loading_model", "processing"],
+              enum: [
+                "connected",
+                "disconnected",
+                "loading_model",
+                "processing",
+              ],
               description: "Agent status",
             },
-            loaded_models: { type: "array", items: { type: "string" }, description: "Models currently loaded" },
-            pending_requests: { type: "integer", description: "Number of pending requests" },
+            loaded_models: {
+              type: "array",
+              items: { type: "string" },
+              description: "Models currently loaded",
+            },
+            pending_requests: {
+              type: "integer",
+              description: "Number of pending requests",
+            },
             last_seen: { type: "string", description: "Last seen timestamp" },
             vram_total: { type: "integer", description: "Total VRAM in bytes" },
             vram_used: { type: "integer", description: "Used VRAM in bytes" },
@@ -898,7 +1055,10 @@ app.get("/openapi.json", (c) => {
           type: "object",
           required: ["model_url", "filename"],
           properties: {
-            model_url: { type: "string", description: "URL to download model from" },
+            model_url: {
+              type: "string",
+              description: "URL to download model from",
+            },
             filename: { type: "string", description: "Filename to save as" },
           },
         },
@@ -912,10 +1072,17 @@ app.get("/openapi.json", (c) => {
         HealthResponse: {
           type: "object",
           properties: {
-            status: { type: "string", enum: ["healthy"], description: "Health status" },
+            status: {
+              type: "string",
+              enum: ["healthy"],
+              description: "Health status",
+            },
             timestamp: { type: "string", description: "Current timestamp" },
             uptime: { type: "number", description: "Server uptime in seconds" },
-            connected_agents: { type: "integer", description: "Number of connected agents" },
+            connected_agents: {
+              type: "integer",
+              description: "Number of connected agents",
+            },
           },
         },
         APIInfoResponse: {
@@ -924,8 +1091,15 @@ app.get("/openapi.json", (c) => {
             name: { type: "string", description: "API name" },
             version: { type: "string", description: "API version" },
             description: { type: "string", description: "API description" },
-            endpoints: { type: "object", additionalProperties: { type: "string" }, description: "Available endpoints" },
-            connected_agents: { type: "integer", description: "Number of connected agents" },
+            endpoints: {
+              type: "object",
+              additionalProperties: { type: "string" },
+              description: "Available endpoints",
+            },
+            connected_agents: {
+              type: "integer",
+              description: "Number of connected agents",
+            },
           },
         },
         ErrorResponse: {
@@ -937,7 +1111,10 @@ app.get("/openapi.json", (c) => {
                 message: { type: "string", description: "Error message" },
                 type: { type: "string", description: "Error type" },
                 code: { type: "string", description: "Error code" },
-                param: { type: "string", description: "Parameter that caused the error" },
+                param: {
+                  type: "string",
+                  description: "Parameter that caused the error",
+                },
               },
             },
           },
@@ -1044,5 +1221,6 @@ container
   .getLogger()
   .info(`Models API: http://${config.host}:${config.port}/v1/models`);
 
-// Export for testing
+// Export for testing and CLI client
 export default app;
+export type AppType = typeof app;

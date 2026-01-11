@@ -161,7 +161,7 @@ describe("PiercerWebSocketHandler", () => {
       ]);
     });
 
-    test("should reject duplicate agent ID", () => {
+    test("should kick out old agent and accept new one with same ID", () => {
       const req = new Request("http://localhost/ws", {
         headers: {
           "agent-id": "agent-1",
@@ -173,16 +173,27 @@ describe("PiercerWebSocketHandler", () => {
       wsHandler.handleConnection(mockWsContext, req);
       expect(wsHandler.isAgentConnected("agent-1")).toBe(true);
 
-      // Second connection with same ID
+      // Second connection with same ID - should kick out old one
       const mockWsContext2 = {
         close: mock(),
         raw: {},
       } as any;
+
+      // Mock transport.getClient to return the first ws
+      transport.getClient = mock().mockReturnValue(mockWsContext);
+
       wsHandler.handleConnection(mockWsContext2, req);
 
-      expect(mockWsContext2.close).toHaveBeenCalledWith(
-        1008,
-        "Agent ID already connected"
+      // Old connection should be kicked out
+      expect(mockWsContext.close).toHaveBeenCalledWith(
+        1001,
+        "Replaced by new connection"
+      );
+      // New connection should be accepted
+      expect(wsHandler.isAgentConnected("agent-1")).toBe(true);
+      expect(transport.registerClient).toHaveBeenCalledWith(
+        mockWsContext2,
+        "agent-1"
       );
     });
 

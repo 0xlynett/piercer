@@ -82,10 +82,7 @@ export class ProcessManager {
 
     // Handle process events
     childProcess.on("exit", (code, signal) => {
-      logger.warn(
-        { modelName, code, signal },
-        "Inference process exited"
-      );
+      logger.warn({ modelName, code, signal }, "Inference process exited");
       this.processes.delete(modelName);
     });
 
@@ -111,7 +108,10 @@ export class ProcessManager {
       logger.info({ modelName }, "Model loaded successfully");
       return managedProcess;
     } catch (error) {
-      logger.error({ modelName, error }, "Failed to load model in child process");
+      logger.error(
+        { modelName, error },
+        "Failed to load model in child process"
+      );
       await this.unloadModel(modelName);
       throw error;
     }
