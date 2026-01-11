@@ -1,0 +1,21 @@
+{
+  "name": "@piercer/agent-harness",
+  "version": "0.1.0",
+  "description": "Utilities for running multiple isolated agent instances",
+  "type": "module",
+  "bin": {
+    "create-agent-dirs": "./create-agent-dirs.ts",
+    "run-agents": "./run-agents.ts"
+  },
+  "scripts": {
+    "create-agent-dirs": "bun create-agent-dirs.ts",
+    "run-agents": "bun run-agents.ts"
+  },
+  "keywords": [
+    "piercer",
+    "agent",
+    "harness",
+    "testing"
+  ],
+  "license": "MIT"
+}

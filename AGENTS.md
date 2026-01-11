@@ -41,7 +41,7 @@ An HTTP API from the controller that includes:
 - `DELETE /management/mappings/:publicName`: Deletes a model mapping.
 - `POST /management/agents/:agentId/models/download`: Triggers a model download on a specific agent. Requires `model_url` and `filename` in the request body.
 
-Update this later.
+This is fully typed using Hono, Zod and OpenAPI. Use `hono/client` if sending a request to the Management API.
 
 # Agent-Controller RPC Architecture
 
@@ -116,9 +116,11 @@ If two agents of the same ID connect the controller, it should always reject the
 
 # Special Agent Instructions
 
-These instructions serve as good defaults, but may be overriden by the user.
+These instructions serve as good defaults.
 
-- Please don't offer to start servers.
+- Don't start servers.
 - Don't write any Markdown files for storing plans.
 - If changes are made, review this document (`AGENTS.md`) and edit it.
 - Ask the user if anything is unclear.
+- When making a new package, DO NOT CREATE A PACKAGES FOLDER and generally try to follow the folder structure as seen in other packages.
+- Default to using bun as package manager and runtime unless node is specified.
