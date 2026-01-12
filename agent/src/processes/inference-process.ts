@@ -4,7 +4,13 @@
  * Communicates with parent via RPC over IPC
  */
 
-import { getLlama, LlamaChatSession } from "node-llama-cpp";
+import {
+  ChatHistoryItem,
+  getLlama,
+  LlamaChat,
+  LlamaChatSession,
+  LlamaCompletion,
+} from "node-llama-cpp";
 import { RPC } from "@piercer/rpc";
 import { ParentProcessTransport } from "../rpc/child-process-transport.js";
 import type {
@@ -14,11 +20,12 @@ import type {
   ChatParams,
 } from "./types.js";
 
-// Single shared Llama instance (CRITICAL: reuse this, don't call getLlama multiple times)
+// Single shared Llama instances
 let llama: any = null;
 let currentModel: any = null;
 let currentContext: any = null;
-let currentSession: LlamaChatSession | null = null;
+
+let sequenceIndex = 0;
 
 // Setup RPC communication with parent
 const transport = new ParentProcessTransport();
@@ -30,7 +37,7 @@ const parent = rpc.remote<MainProcessFunctions>();
  */
 function mapParameters(params: CompletionParams | ChatParams) {
   return {
-    maxTokens: params.max_tokens,
+    maxTokens: params.max_tokens ?? 1024,
     temperature: params.temperature,
     topP: params.top_p,
     stopStrings: params.stop,
@@ -59,7 +66,6 @@ const functions: InferenceProcessFunctions = {
         await currentModel.dispose();
         currentModel = null;
         currentContext = null;
-        currentSession = null;
       }
 
       // Load new model with auto-disposal support
@@ -74,12 +80,6 @@ const functions: InferenceProcessFunctions = {
         contextSize: params.contextSize,
       });
 
-      console.log("Creating session...");
-      const sequence = currentContext.getSequence();
-      currentSession = new LlamaChatSession({
-        contextSequence: sequence,
-      });
-
       console.log("Model loaded successfully");
       return { success: true };
     } catch (error: any) {
@@ -92,7 +92,7 @@ const functions: InferenceProcessFunctions = {
   },
 
   async completion(params) {
-    if (!currentSession) {
+    if (!currentContext) {
       throw new Error("No model loaded");
     }
 
@@ -100,9 +100,16 @@ const functions: InferenceProcessFunctions = {
       const llamaParams = mapParameters(params);
       const stream = params.stream !== false; // Default to streaming
 
+      const sequence = currentContext.getSequence(sequenceIndex);
+      const completion = new LlamaCompletion({
+        contextSequence: sequence,
+      });
+
+      if (++sequenceIndex > 4) sequenceIndex = 0;
+
       if (stream) {
         // Streaming mode: send chunks as they arrive
-        await currentSession.prompt(params.prompt, {
+        await completion.generateCompletion(params.prompt, {
           ...llamaParams,
           onTextChunk: (chunk: string) => {
             // Send text chunk to parent
@@ -132,12 +139,8 @@ const functions: InferenceProcessFunctions = {
         });
       } else {
         // Non-streaming: accumulate all chunks
-        let fullText = "";
-        await currentSession.prompt(params.prompt, {
+        let fullText = await completion.generateCompletion(params.prompt, {
           ...llamaParams,
-          onTextChunk: (chunk: string) => {
-            fullText += chunk;
-          },
         });
 
         // Send complete response
@@ -164,6 +167,7 @@ const functions: InferenceProcessFunctions = {
           },
         });
       }
+      sequence.dispose();
     } catch (error: any) {
       console.error("Completion error:", error);
       await parent.receiveError({
@@ -177,7 +181,7 @@ const functions: InferenceProcessFunctions = {
   },
 
   async chat(params) {
-    if (!currentSession) {
+    if (!currentContext) {
       throw new Error("No model loaded");
     }
 
@@ -185,15 +189,42 @@ const functions: InferenceProcessFunctions = {
       const llamaParams = mapParameters(params);
       const stream = params.stream !== false; // Default to streaming
 
-      // Format messages into a prompt
-      // This is a simple format - could be improved based on model
-      const prompt = params.messages
-        .map((msg) => `${msg.role}: ${msg.content}`)
-        .join("\n") + "\nassistant:";
+      // TODO ADD REASONING CHUNKS
+      const history: ChatHistoryItem[] = params.messages.map((v) => {
+        if (v.role != "system" && v.role != "user" && v.role != "assistant")
+          throw new Error(
+            `Incorrect role: ${v.role} is not one of system, user, assistant`
+          );
+
+        if (v.role == "system") {
+          return {
+            type: v.role,
+            text: v.content,
+          };
+        } else if (v.role == "user") {
+          return {
+            type: v.role,
+            text: v.content,
+          };
+        } else {
+          return {
+            type: v.role == "assistant" ? "model" : v.role,
+            response: [v.content],
+          };
+        }
+      });
+
+      console.log("Creating session...");
+      const sequence = currentContext.getSequence(sequenceIndex);
+      const currentSession = new LlamaChat({
+        contextSequence: sequence,
+      });
+
+      if (++sequenceIndex > 4) sequenceIndex = 0;
 
       if (stream) {
         // Streaming mode: send chunks as they arrive
-        await currentSession.prompt(prompt, {
+        await currentSession.generateResponse(history, {
           ...llamaParams,
           onTextChunk: (chunk: string) => {
             // Send text chunk to parent
@@ -260,6 +291,8 @@ const functions: InferenceProcessFunctions = {
           },
         });
       }
+
+      sequence.dispose();
     } catch (error: any) {
       console.error("Chat error:", error);
       await parent.receiveError({
@@ -283,7 +316,6 @@ const functions: InferenceProcessFunctions = {
 
       currentModel = null;
       currentContext = null;
-      currentSession = null;
 
       return { success: true };
     } catch (error: any) {

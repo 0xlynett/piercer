@@ -67,6 +67,31 @@ function handleError(fn: (...args: any[]) => Promise<void>) {
   };
 }
 
+// Signal handler helper for streaming commands
+function setupSignalHandler(): { aborted: boolean; cleanup: () => void } {
+  let aborted = false;
+
+  const handleSignal = () => {
+    if (!aborted) {
+      aborted = true;
+      console.error(chalk.yellow("\n[Stopped by user]"));
+    }
+  };
+
+  process.on("SIGINT", handleSignal);
+  process.on("SIGTERM", handleSignal);
+
+  return {
+    get aborted() {
+      return aborted;
+    },
+    cleanup: () => {
+      process.off("SIGINT", handleSignal);
+      process.off("SIGTERM", handleSignal);
+    },
+  };
+}
+
 const program = new Command();
 
 program
@@ -241,27 +266,46 @@ program
 program
   .command("chat <model> <message>")
   .description("Send a chat completion request")
+  .option(
+    "-n, --max-tokens <number>",
+    "Maximum number of tokens to generate",
+    "1024"
+  )
   .action(
-    handleError(async (model: string, message: string) => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      const openai = new OpenAI({
-        baseURL: `${baseUrl}/v1`,
-        apiKey: process.env.API_KEY,
-      });
+    handleError(
+      async (
+        model: string,
+        message: string,
+        options: { maxTokens?: string }
+      ) => {
+        const baseUrl = getBaseUrl(program.opts().url);
+        const openai = new OpenAI({
+          baseURL: `${baseUrl}/v1`,
+          apiKey: process.env.API_KEY,
+        });
 
-      console.log(chalk.gray(`Sending chat request to model: ${model}...`));
+        console.log(chalk.gray(`Sending chat request to model: ${model}...`));
 
-      const stream = await openai.chat.completions.create({
-        model,
-        messages: [{ role: "user", content: message }],
-        stream: true,
-      });
+        const { aborted, cleanup } = setupSignalHandler();
 
-      for await (const chunk of stream) {
-        process.stdout.write(chunk.choices[0]?.delta?.content || "");
+        try {
+          const stream = await openai.chat.completions.create({
+            model,
+            messages: [{ role: "user", content: message }],
+            max_tokens: parseInt(options.maxTokens || "1024", 10),
+            stream: true,
+          });
+
+          for await (const chunk of stream) {
+            if (aborted) break;
+            process.stdout.write(chunk.choices[0]?.delta?.content || "");
+          }
+          process.stdout.write("\n");
+        } finally {
+          cleanup();
+        }
       }
-      process.stdout.write("\n");
-    })
+    )
   );
 
 // Completion command
@@ -269,29 +313,48 @@ program
 program
   .command("complete <model> <prompt>")
   .description("Send a text completion request")
+  .option(
+    "-n, --max-tokens <number>",
+    "Maximum number of tokens to generate",
+    "1024"
+  )
   .action(
-    handleError(async (model: string, prompt: string) => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      const openai = new OpenAI({
-        baseURL: `${baseUrl}/v1`,
-        apiKey: process.env.API_KEY,
-      });
+    handleError(
+      async (
+        model: string,
+        prompt: string,
+        options: { maxTokens?: string }
+      ) => {
+        const baseUrl = getBaseUrl(program.opts().url);
+        const openai = new OpenAI({
+          baseURL: `${baseUrl}/v1`,
+          apiKey: process.env.API_KEY,
+        });
 
-      console.log(
-        chalk.gray(`Sending completion request to model: ${model}...`)
-      );
+        console.log(
+          chalk.gray(`Sending completion request to model: ${model}...`)
+        );
 
-      const stream = await openai.completions.create({
-        model,
-        prompt,
-        stream: true,
-      });
+        const { aborted, cleanup } = setupSignalHandler();
 
-      for await (const chunk of stream) {
-        process.stdout.write(chunk.choices[0]?.text || "");
+        try {
+          const stream = await openai.completions.create({
+            model,
+            prompt,
+            max_tokens: parseInt(options.maxTokens || "1024", 10),
+            stream: true,
+          });
+
+          for await (const chunk of stream) {
+            if (aborted) break;
+            process.stdout.write(chunk.choices[0]?.text || "");
+          }
+          process.stdout.write("\n");
+        } finally {
+          cleanup();
+        }
       }
-      process.stdout.write("\n");
-    })
+    )
   );
 
 program.parse();
