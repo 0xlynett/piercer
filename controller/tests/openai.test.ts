@@ -4,10 +4,12 @@ import type { AgentFunctions, ControllerFunctions } from "../src/rpc-types";
 import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
 
-// Set environment variables before importing the app
+// Set environment variables BEFORE importing the app
 const TEST_DB = `./test-${randomUUID()}.db`;
 process.env.DATABASE_PATH = TEST_DB;
 process.env.PORT = "0"; // Random port
+process.env.API_KEY = ""; // No API key required for tests
+process.env.AGENT_SECRET_KEY = ""; // No agent secret key for tests
 
 describe("OpenAI API Integration", () => {
   let server: any;
@@ -230,7 +232,7 @@ describe("OpenAI API Integration", () => {
 
       if (value) {
         buffer += decoder.decode(value, { stream: true });
-        
+
         // Split by double newline (SSE message separator)
         const lines = buffer.split("\n");
         buffer = lines.pop() || ""; // Keep incomplete line in buffer
@@ -238,7 +240,7 @@ describe("OpenAI API Integration", () => {
         for (const line of lines) {
           if (line.startsWith("data: ")) {
             const data = line.slice(6); // Remove "data: " prefix
-            
+
             if (data === "[DONE]") {
               console.log("Received [DONE] marker");
               done = true;

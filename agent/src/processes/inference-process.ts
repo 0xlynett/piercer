@@ -8,8 +8,9 @@ import {
   ChatHistoryItem,
   getLlama,
   LlamaChat,
-  LlamaChatSession,
+  LlamaChatResponseChunk,
   LlamaCompletion,
+  LlamaCompletionOptions,
 } from "node-llama-cpp";
 import { RPC } from "@piercer/rpc";
 import { ParentProcessTransport } from "../rpc/child-process-transport.js";
@@ -33,12 +34,47 @@ const rpc = new RPC<InferenceProcessFunctions>(transport);
 const parent = rpc.remote<MainProcessFunctions>();
 
 /**
+ * Format a chat completion chunk with support for reasoning content
+ */
+function formatChatChunk(
+  text: string,
+  requestId: string,
+  toolCalls?: any,
+  content?: string,
+  reasoningContent?: string
+) {
+  const choice: any = {
+    index: 0,
+    delta: {},
+    finish_reason: null,
+  };
+
+  if (reasoningContent !== undefined) {
+    choice.delta.reasoning_content = reasoningContent;
+  }
+  if (content !== undefined) {
+    choice.delta.content = content;
+  }
+  if (toolCalls) {
+    choice.delta.tool_calls = toolCalls;
+  }
+
+  return {
+    id: requestId,
+    object: "chat.completion.chunk",
+    created: Date.now(),
+    model: "unknown",
+    choices: [choice],
+  };
+}
+
+/**
  * Map OpenAI parameters to llama.cpp parameters
  */
 function mapParameters(params: CompletionParams | ChatParams) {
   return {
     maxTokens: params.max_tokens ?? 1024,
-    temperature: params.temperature,
+    temperature: params.temperature ?? 1,
     topP: params.top_p,
     stopStrings: params.stop,
     // Note: node-llama-cpp may not support all OpenAI params
@@ -111,6 +147,7 @@ const functions: InferenceProcessFunctions = {
         // Streaming mode: send chunks as they arrive
         await completion.generateCompletion(params.prompt, {
           ...llamaParams,
+          seed: Math.floor(Math.random() * 1_000_000),
           onTextChunk: (chunk: string) => {
             // Send text chunk to parent
             parent.receiveChunk({
@@ -141,6 +178,7 @@ const functions: InferenceProcessFunctions = {
         // Non-streaming: accumulate all chunks
         let fullText = await completion.generateCompletion(params.prompt, {
           ...llamaParams,
+          seed: Math.floor(Math.random() * 1_000_000),
         });
 
         // Send complete response
@@ -189,7 +227,7 @@ const functions: InferenceProcessFunctions = {
       const llamaParams = mapParameters(params);
       const stream = params.stream !== false; // Default to streaming
 
-      // TODO ADD REASONING CHUNKS
+      // Map messages to chat history, supporting reasoning content
       const history: ChatHistoryItem[] = params.messages.map((v) => {
         if (v.role != "system" && v.role != "user" && v.role != "assistant")
           throw new Error(
@@ -198,19 +236,27 @@ const functions: InferenceProcessFunctions = {
 
         if (v.role == "system") {
           return {
-            type: v.role,
+            type: "system",
             text: v.content,
           };
         } else if (v.role == "user") {
           return {
-            type: v.role,
+            type: "user",
             text: v.content,
           };
         } else {
-          return {
-            type: v.role == "assistant" ? "model" : v.role,
+          const assistantItem: ChatHistoryItem = {
+            type: "model",
             response: [v.content],
           };
+
+          // If this message has reasoning_content, include it in response
+          if ("reasoning_content" in v && v.reasoning_content) {
+            // Include reasoning content as part of the response for context
+            assistantItem.response = [String(v.reasoning_content), v.content];
+          }
+
+          return assistantItem;
         }
       });
 
@@ -226,26 +272,24 @@ const functions: InferenceProcessFunctions = {
         // Streaming mode: send chunks as they arrive
         await currentSession.generateResponse(history, {
           ...llamaParams,
-          onTextChunk: (chunk: string) => {
-            // Send text chunk to parent
+          seed: Math.floor(Math.random() * 1_000_000),
+          onResponseChunk: (chunk: LlamaChatResponseChunk) => {
+            // Handle reasoning chunks
+            const isReasoning =
+              chunk.type === "segment" && chunk.segmentType === "thought";
+            const content = isReasoning ? undefined : chunk.text;
+            const reasoningContent = isReasoning ? chunk.text : undefined;
+
+            const formattedChunk = formatChatChunk(
+              chunk.text,
+              params.requestId,
+              undefined, // no tool calls for now
+              content,
+              reasoningContent
+            );
             parent.receiveChunk({
               requestId: params.requestId,
-              data: {
-                id: `chatcmpl-${Date.now()}`,
-                object: "chat.completion.chunk",
-                created: Math.floor(Date.now() / 1000),
-                model: params.model,
-                choices: [
-                  {
-                    index: 0,
-                    delta: {
-                      role: "assistant",
-                      content: chunk,
-                    },
-                    finish_reason: null,
-                  },
-                ],
-              },
+              data: formattedChunk,
             });
           },
         });
@@ -256,14 +300,16 @@ const functions: InferenceProcessFunctions = {
           data: "[DONE]",
         });
       } else {
-        // Non-streaming: accumulate all chunks
-        let fullText = "";
-        await currentSession.prompt(prompt, {
+        // Non-streaming: get full response
+        const result = await currentSession.generateResponse(history, {
           ...llamaParams,
-          onTextChunk: (chunk: string) => {
-            fullText += chunk;
-          },
+          seed: Math.floor(Math.random() * 1_000_000),
         });
+
+        // Extract text from response segments
+        const fullText = Array.isArray(result.response)
+          ? result.response.map((s: any) => s.text || "").join("")
+          : result.response || "";
 
         // Send complete response
         await parent.receiveComplete({

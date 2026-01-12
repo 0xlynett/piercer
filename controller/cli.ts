@@ -271,12 +271,13 @@ program
     "Maximum number of tokens to generate",
     "1024"
   )
+  .option("-r, --show-reasoning", "Show reasoning content alongside response")
   .action(
     handleError(
       async (
         model: string,
         message: string,
-        options: { maxTokens?: string }
+        options: { maxTokens?: string; showReasoning?: boolean }
       ) => {
         const baseUrl = getBaseUrl(program.opts().url);
         const openai = new OpenAI({
@@ -287,6 +288,9 @@ program
         console.log(chalk.gray(`Sending chat request to model: ${model}...`));
 
         const { aborted, cleanup } = setupSignalHandler();
+        let hasReasoning = false;
+        let reasoningStarted = false;
+        let responseStarted = false;
 
         try {
           const stream = await openai.chat.completions.create({
@@ -298,9 +302,53 @@ program
 
           for await (const chunk of stream) {
             if (aborted) break;
-            process.stdout.write(chunk.choices[0]?.delta?.content || "");
+
+            const delta = chunk.choices[0]?.delta as any;
+            const reasoningContent = delta?.reasoning_content;
+            const content = delta?.content;
+            const reasoningEnded =
+              delta?.reasoning_content === null &&
+              hasReasoning &&
+              !reasoningStarted === false;
+
+            if (options.showReasoning && reasoningContent) {
+              if (!reasoningStarted) {
+                // Start of reasoning - print header
+                console.log("\n" + chalk.cyan.bold("═══ REASONING ═══"));
+                reasoningStarted = true;
+                hasReasoning = true;
+              }
+              // Stream reasoning content as it arrives
+              process.stdout.write(chalk.gray(reasoningContent));
+            } else if (content) {
+              // First response content after reasoning - end reasoning section if it was shown
+              if (reasoningStarted && options.showReasoning) {
+                console.log("\n" + chalk.cyan.bold("═══ END REASONING ═══"));
+                reasoningStarted = false;
+              }
+              // Start of response - print header
+              if (!responseStarted) {
+                console.log(chalk.green.bold("═══ RESPONSE ═══"));
+                responseStarted = true;
+              }
+              // Stream response content as it arrives
+              process.stdout.write(content);
+            }
           }
-          process.stdout.write("\n");
+
+          // Print end markers if sections were shown
+          if (options.showReasoning && reasoningStarted) {
+            console.log("\n" + chalk.cyan.bold("═══ END REASONING ═══"));
+          }
+          if (responseStarted) {
+            console.log("\n" + chalk.green.bold("═══ END RESPONSE ═══\n"));
+          } else if (!options.showReasoning && hasReasoning) {
+            // No response but had reasoning - just show reasoning end marker
+            console.log("\n" + chalk.cyan.bold("═══ END REASONING ═══\n"));
+          } else if (!responseStarted && !hasReasoning) {
+            // No content at all
+            console.log();
+          }
         } finally {
           cleanup();
         }

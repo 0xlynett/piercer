@@ -73,6 +73,7 @@ export interface ChatCompletionRequest {
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  reasoning_content?: string;
   name?: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
@@ -1031,6 +1032,7 @@ export class OpenAIAPIHandler {
     // Combine chunks into final response
     let response: ChatCompletionResponse | null = null;
     let fullContent = "";
+    let fullReasoningContent = "";
 
     for (const chunk of chunks) {
       if (!response) {
@@ -1046,6 +1048,7 @@ export class OpenAIAPIHandler {
               message: {
                 role: "assistant",
                 content: "",
+                reasoning_content: undefined,
               },
               logprobs: null,
               finish_reason: "stop",
@@ -1059,10 +1062,13 @@ export class OpenAIAPIHandler {
         };
       }
 
-      // Accumulate content from delta
+      // Accumulate content and reasoning_content from delta
       if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta) {
         if (chunk.choices[0].delta.content) {
           fullContent += chunk.choices[0].delta.content;
+        }
+        if (chunk.choices[0].delta.reasoning_content) {
+          fullReasoningContent += chunk.choices[0].delta.reasoning_content;
         }
         if (chunk.choices[0].finish_reason && response && response.choices[0]) {
           response.choices[0].finish_reason = chunk.choices[0].finish_reason;
@@ -1076,6 +1082,9 @@ export class OpenAIAPIHandler {
 
     if (response.choices[0]) {
       response.choices[0].message.content = fullContent;
+      if (fullReasoningContent) {
+        response.choices[0].message.reasoning_content = fullReasoningContent;
+      }
     }
 
     return response;
