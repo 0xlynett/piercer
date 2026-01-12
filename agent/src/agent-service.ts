@@ -347,22 +347,36 @@ export class AgentService {
     this.modelsWatcher = watchModelsFolder(
       this.config.modelsDir,
       async (models) => {
-        if (this.controllerRPC) {
-          try {
-            await this.controllerRPC.updateModels({
-              agentId: this.agentId,
-              models,
-            });
-            logger.info(
-              { modelCount: models.length },
-              "Notified controller of model changes"
-            );
-          } catch (error) {
-            logger.error(
-              { error },
-              "Failed to notify controller of model changes"
-            );
-          }
+        if (!this.controllerRPC) {
+          logger.warn(
+            { modelCount: models.length },
+            "Controller RPC not ready, skipping model notification"
+          );
+          return;
+        }
+
+        try {
+          await this.controllerRPC.updateModels({
+            agentId: this.agentId,
+            models,
+          });
+          logger.info(
+            { modelCount: models.length },
+            "Notified controller of model changes"
+          );
+        } catch (error) {
+          const serializedError =
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : String(error);
+          logger.error(
+            { error: serializedError, modelCount: models.length },
+            "Failed to notify controller of model changes"
+          );
         }
       }
     );

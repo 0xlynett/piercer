@@ -25,11 +25,36 @@ logger.info({ config: { ...config, agentSecretKey: "***" } }, "Starting agent");
 // Initialize agent service
 const agentService = new AgentService(config);
 
+// Helper to serialize error for logging
+function serializeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      cause: error.cause,
+    };
+  }
+  if (typeof error === "object" && error !== null) {
+    try {
+      return JSON.parse(JSON.stringify(error));
+    } catch {
+      return { raw: String(error) };
+    }
+  }
+  return { value: error };
+}
+
 // Refresh connection - only refreshes websocket/RPC layer, not full initialization
 const refreshConnection = async () => {
   const agentId = agentService.getAgentId();
   const agentName = agentService.getAgentName();
   const installedModels = await agentService.getInstalledModels();
+
+  logger.info(
+    { controllerUrl: config.controllerUrl, agentId, agentName },
+    "Connecting to controller"
+  );
 
   const transport = new WebSocketTransport(config.controllerUrl, {
     headers: {
@@ -57,10 +82,28 @@ const refreshConnection = async () => {
   const controller = rpc.remote<any>();
   agentService.setControllerRPC(controller);
 
+  // Track if we've set up watching for this connection
+  let watchingStarted = false;
+
   // Connection events
-  transport.on("open", () => {
+  transport.on("open", async () => {
     logger.info("Connected to controller");
     reconnectAttempts = 0; // Reset reconnect counter on successful connection
+
+    // Start watching models folder only after connection is established
+    // This ensures the initial model notification goes through
+    if (!watchingStarted) {
+      watchingStarted = true;
+      try {
+        await agentService.startWatching();
+      } catch (watchError) {
+        logger.error(
+          { error: serializeError(watchError) },
+          "Failed to start watching models folder"
+        );
+        // Don't throw - watching is not critical for startup
+      }
+    }
   });
 
   transport.on("close", (code: number, reason: string) => {
@@ -72,15 +115,11 @@ const refreshConnection = async () => {
   });
 
   transport.on("error", (err: any) => {
-    logger.error({ error: err }, "Transport error");
+    logger.error({ error: serializeError(err) }, "Transport error");
   });
 
-  // Start watching models folder for changes (only on first connection)
-  if (!currentTransport) {
-    await agentService.startWatching();
-  }
-
-  await transport.connect();
+  // Note: WebSocketTransport connects automatically in constructor
+  // No explicit connect() call needed
 
   // Update current transport reference
   currentTransport = transport;
@@ -126,7 +165,7 @@ const handleDisconnect = (code: number, reason: string) => {
       await refreshConnection();
       logger.info("Successfully reconnected");
     } catch (error) {
-      logger.error({ error }, "Reconnection failed");
+      logger.error({ error: serializeError(error) }, "Reconnection failed");
     }
   }, delay);
 };
@@ -148,7 +187,7 @@ const shutdown = async (signal: string) => {
     logger.info("Shutdown complete");
     process.exit(0);
   } catch (error) {
-    logger.error({ error }, "Error during shutdown");
+    logger.error({ error: serializeError(error) }, "Error during shutdown");
     process.exit(1);
   }
 };
@@ -179,7 +218,10 @@ const shutdown = async (signal: string) => {
 
     logger.info("Agent running");
   } catch (error) {
-    logger.error({ error }, "Fatal error during agent startup");
+    logger.error(
+      { error: serializeError(error) },
+      "Fatal error during agent startup"
+    );
     process.exit(1);
   }
 })();
