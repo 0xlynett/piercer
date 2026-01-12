@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import OpenAI from "openai";
+import blessed from "blessed";
 
 const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:3000";
 
@@ -25,6 +26,14 @@ interface Agent {
 interface ModelMapping {
   public_name: string;
   internal_name: string;
+}
+
+// Message types for chat TUI
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  reasoning?: string;
+  timestamp: Date;
 }
 
 function getBaseUrl(url: string): string {
@@ -90,6 +99,316 @@ function setupSignalHandler(): { aborted: boolean; cleanup: () => void } {
       process.off("SIGTERM", handleSignal);
     },
   };
+}
+
+// TUI Chat Function
+async function startChatTUI(
+  baseUrl: string,
+  model: string,
+  showReasoning: boolean
+): Promise<void> {
+  const openai = new OpenAI({
+    baseURL: `${baseUrl}/v1`,
+    apiKey: process.env.API_KEY,
+  });
+
+  // Message history
+  const messages: ChatMessage[] = [];
+
+  // Input history for arrow key navigation
+  const inputHistory: string[] = [];
+  let historyIndex = -1;
+
+  // Create screen
+  const screen = blessed.screen({
+    smartCSR: true,
+    title: `Piercer Chat - ${model}`,
+    fullUnicode: true,
+  });
+
+  // Create chat log (main content area)
+  const chatLog = blessed.box({
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "80%",
+    scrollable: true,
+    alwaysScrollable: true,
+    keys: false,
+    mouse: true,
+    border: {
+      type: "line",
+      fg: "#ffffff",
+    },
+    style: {
+      fg: "white",
+      bg: "#1a1a2e",
+      border: {
+        fg: "#4a9eff",
+      },
+    },
+  });
+
+  // Create status bar
+  const statusBar = blessed.box({
+    top: "80%",
+    left: 0,
+    width: "100%",
+    height: "5%",
+    style: {
+      fg: "white",
+      bg: "#2d2d44",
+    },
+    content: ` Model: ${model} | Reasoning: ${
+      showReasoning ? "ON" : "OFF"
+    } | /exit to quit | Ctrl+C to interrupt`,
+  });
+
+  // Create input line
+  const inputLine = blessed.textbox({
+    top: "85%",
+    left: 0,
+    width: "100%",
+    height: "15%",
+    inputOnFocus: true,
+    border: {
+      type: "line",
+      fg: "#4a9eff",
+    },
+    style: {
+      fg: "white",
+      bg: "#16213e",
+      focus: {
+        border: {
+          fg: "#00ff88",
+        },
+      },
+    },
+    placeholder:
+      "Type your message... (Enter to send, Ctrl+C to quit, ↑↓ for history)",
+  });
+
+  // Create processing indicator
+  const processingBox = blessed.box({
+    top: "45%",
+    left: "center",
+    width: "30%",
+    height: "3",
+    align: "center",
+    tags: true,
+    style: {
+      fg: "#00ff88",
+      bg: "transparent",
+    },
+    content: "{bold}Processing...{/}",
+    hidden: true,
+  });
+
+  // Add all elements to screen
+  screen.append(chatLog);
+  screen.append(statusBar);
+  screen.append(inputLine);
+  screen.append(processingBox);
+
+  // Function to add a message to the chat log
+  function addMessage(msg: ChatMessage) {
+    const timestamp = msg.timestamp.toLocaleTimeString();
+    let formattedMessage = "";
+
+    if (msg.role === "user") {
+      formattedMessage = `{bold}{magenta-fg}[${timestamp}] You:{/}\n${msg.content}\n`;
+    } else {
+      formattedMessage = `{bold}{green-fg}[${timestamp}] Model:{/}\n`;
+      if (showReasoning && msg.reasoning) {
+        formattedMessage += `{cyan-fg}Reasoning: ${msg.reasoning}{/}\n\n`;
+      }
+      formattedMessage += `{white-fg}${msg.content}{/}\n`;
+    }
+
+    // Append to chat log
+    const currentContent = chatLog.getContent();
+    chatLog.setContent(currentContent + formattedMessage + "\n");
+
+    // Scroll to bottom
+    chatLog.setScrollPerc(100);
+    screen.render();
+  }
+
+  // Function to send message to model
+  async function sendMessage(content: string) {
+    if (!content.trim()) return;
+
+    // Add user message to history
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: content.trim(),
+      timestamp: new Date(),
+    };
+    messages.push(userMsg);
+    addMessage(userMsg);
+
+    // Add to input history
+    if (content.trim() && !inputHistory.includes(content.trim())) {
+      inputHistory.push(content.trim());
+    }
+    historyIndex = inputHistory.length;
+
+    // Show processing indicator
+    processingBox.show();
+    screen.render();
+
+    try {
+      // Convert messages to OpenAI format
+      const openaiMessages = messages.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      const stream = await openai.chat.completions.create({
+        model,
+        messages: openaiMessages as any,
+        max_tokens: 2048,
+        stream: true,
+      });
+
+      let assistantContent = "";
+      let assistantReasoning = "";
+      let hasReasoning = false;
+      let reasoningStarted = false;
+
+      // Hide processing indicator
+      processingBox.hide();
+
+      // Create assistant message placeholder
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: "",
+        timestamp: new Date(),
+      };
+      messages.push(assistantMsg);
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta as any;
+        const reasoningContent = delta?.reasoning_content;
+        const contentDelta = delta?.content;
+
+        if (showReasoning && reasoningContent) {
+          hasReasoning = true;
+          assistantReasoning += reasoningContent;
+          assistantMsg.reasoning = assistantReasoning;
+          assistantMsg.content += reasoningContent;
+          // Update the last message
+          messages[messages.length - 1] = assistantMsg;
+          addMessage(assistantMsg);
+          // Remove the just-added message to avoid duplication
+          const lines = chatLog.getContent().split("\n");
+          chatLog.setContent(lines.slice(0, -3).join("\n") + "\n");
+        } else if (contentDelta) {
+          assistantContent += contentDelta;
+          assistantMsg.content = assistantContent;
+          if (hasReasoning) {
+            assistantMsg.reasoning = assistantReasoning;
+          }
+          // Update the last message
+          messages[messages.length - 1] = assistantMsg;
+          addMessage(assistantMsg);
+          // Remove the just-added message to avoid duplication
+          const lines = chatLog.getContent().split("\n");
+          chatLog.setContent(lines.slice(0, -3).join("\n") + "\n");
+        }
+
+        screen.render();
+      }
+
+      // Final update
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage) {
+        lastMessage.content = assistantContent;
+        lastMessage.reasoning = hasReasoning ? assistantReasoning : undefined;
+        addMessage(lastMessage);
+      }
+    } catch (error) {
+      processingBox.hide();
+      const errorMsg: ChatMessage = {
+        role: "assistant",
+        content: `Error: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+        timestamp: new Date(),
+      };
+      messages.push(errorMsg);
+      addMessage(errorMsg);
+    }
+
+    screen.render();
+  }
+
+  // Input line key handlers
+  inputLine.key("enter", async () => {
+    const content = inputLine.getValue();
+    inputLine.setValue("");
+
+    // Handle /exit command
+    if (content.trim().toLowerCase() === "/exit") {
+      screen.destroy();
+      console.log(chalk.yellow("Goodbye!"));
+      process.exit(0);
+    }
+
+    await sendMessage(content);
+  });
+
+  inputLine.key("up", () => {
+    if (historyIndex > 0) {
+      historyIndex--;
+      const value = inputHistory[historyIndex];
+      if (value) inputLine.setValue(value);
+    }
+  });
+
+  inputLine.key("down", () => {
+    if (historyIndex < inputHistory.length - 1) {
+      historyIndex++;
+      const value = inputHistory[historyIndex];
+      if (value) inputLine.setValue(value);
+    } else {
+      historyIndex = inputHistory.length;
+      inputLine.setValue("");
+    }
+  });
+
+  inputLine.key("C-c", () => {
+    screen.destroy();
+    process.exit(0);
+  });
+
+  // Screen key handlers
+  screen.key("C-c", () => {
+    screen.destroy();
+    process.exit(0);
+  });
+
+  // Handle window resize
+  screen.on("resize", () => {
+    chatLog.width = "100%";
+    chatLog.height = "80%";
+    statusBar.top = "80%";
+    inputLine.top = "85%";
+    processingBox.top = "45%";
+    screen.render();
+  });
+
+  // Focus input line
+  inputLine.focus();
+  screen.render();
+
+  // Initial welcome message
+  const welcomeMsg: ChatMessage = {
+    role: "assistant",
+    content: `Welcome to Piercer Chat! You're now talking to ${model}.\nType your message and press Enter to send.\nUse /exit to quit.`,
+    timestamp: new Date(),
+  };
+  addMessage(welcomeMsg);
 }
 
 const program = new Command();
@@ -306,10 +625,6 @@ program
             const delta = chunk.choices[0]?.delta as any;
             const reasoningContent = delta?.reasoning_content;
             const content = delta?.content;
-            const reasoningEnded =
-              delta?.reasoning_content === null &&
-              hasReasoning &&
-              !reasoningStarted === false;
 
             if (options.showReasoning && reasoningContent) {
               if (!reasoningStarted) {
@@ -352,6 +667,26 @@ program
         } finally {
           cleanup();
         }
+      }
+    )
+  );
+
+// REPL/Chat TUI command
+
+program
+  .command("repl")
+  .description("Start an interactive chat TUI")
+  .option("-m, --model <name>", "Model to use for chat", "default")
+  .option("-r, --show-reasoning", "Show reasoning content alongside response")
+  .action(
+    handleError(
+      async (options: { model?: string; showReasoning?: boolean }) => {
+        const baseUrl = getBaseUrl(program.opts().url);
+        const model = options.model || "default";
+        const showReasoning = options.showReasoning || false;
+
+        console.log(chalk.gray("Starting chat TUI..."));
+        await startChatTUI(baseUrl, model, showReasoning);
       }
     )
   );

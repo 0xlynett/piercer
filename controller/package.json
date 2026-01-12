@@ -7,13 +7,15 @@
     "piercer-cli": "./cli.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/blessed": "^0.1.25"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
     "@piercer/rpc": "workspace:*",
+    "blessed": "^0.1.81",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "hono": "^4.11.3",
