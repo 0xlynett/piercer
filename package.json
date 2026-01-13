@@ -18,7 +18,7 @@
   "scripts": {
     "agent": "node --env-file=.env --import tsx/esm agent",
     "controller": "bun ./controller",
-    "cli": "cd cli && bun run src/index.tsx",
+    "cli": "bun run ./cli/src/index.tsx",
     "harness:create-dirs": "bun harness/create-agent-dirs.ts",
     "harness:run": "bun harness/run-agents.ts"
   },

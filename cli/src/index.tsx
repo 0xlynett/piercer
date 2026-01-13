@@ -1,15 +1,8 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import chalk from "chalk";
-import OpenAI from "openai";
 import { render } from "ink";
 import React from "react";
-import type {
-  ControllerInfo,
-  Agent,
-  ModelMapping,
-  ChatMessage,
-} from "./types.js";
 import {
   fetchControllerInfo,
   checkHealth,

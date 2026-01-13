@@ -112,9 +112,50 @@ export async function downloadModel(
 }
 
 export function createOpenAIClient(url: string, apiKey?: string): OpenAI {
+  if (!apiKey && !process.env.API_KEY) throw new Error("No API key configured");
   const baseUrl = getBaseUrl(url);
   return new OpenAI({
     baseURL: `${baseUrl}/v1`,
     apiKey: apiKey || process.env.API_KEY,
+    dangerouslyAllowBrowser: true,
   });
+}
+
+export async function chat(
+  client: OpenAI,
+  model: string,
+  messages: Array<{
+    role: "user" | "assistant" | "system" | "tool";
+    content: string;
+  }>,
+  onChunk: (content: string) => void
+): Promise<void> {
+  const stream = await client.chat.completions.create({
+    model,
+    messages: messages as any,
+    max_tokens: 4096,
+    stream: true,
+  });
+
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) {
+      onChunk(delta);
+    }
+  }
+}
+
+export async function listOpenAIModels(
+  client: OpenAI
+): Promise<AvailableModel[]> {
+  try {
+    const response = await client.models.list();
+    return response.data.map((m) => ({
+      public_name: m.id,
+      internal_name: m.id,
+    }));
+  } catch {
+    // Fallback for controllers that don't implement /v1/models
+    return [];
+  }
 }

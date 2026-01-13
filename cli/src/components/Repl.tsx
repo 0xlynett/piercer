@@ -1,56 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import type { ChatMessage, AvailableModel } from "../types.js";
-import { listModels } from "../api.js";
+import { createOpenAIClient, chat, listOpenAIModels } from "../api.js";
+import type OpenAI from "openai";
 
 interface ReplProps {
   baseUrl: string;
   model: string;
   showReasoning: boolean;
   onExit?: () => void;
-}
-
-// Simulated OpenAI client for demo - replace with actual client
-interface OpenAIClient {
-  chat: {
-    completions: {
-      create: (options: {
-        model: string;
-        messages: Array<{ role: string; content: string }>;
-        max_tokens: number;
-        stream: boolean;
-      }) => AsyncIterable<any>;
-    };
-  };
-}
-
-function createOpenAIClient(baseUrl: string): OpenAIClient {
-  return {
-    chat: {
-      completions: {
-        create: async function* (_options: {
-          model: string;
-          messages: Array<{ role: string; content: string }>;
-          max_tokens: number;
-          stream: boolean;
-        }) {
-          // This would be replaced with actual OpenAI streaming
-          // For demo purposes, we simulate a response
-          const response = `This is a simulated response from the model. In a real implementation, this would stream from the OpenAI-compatible API at ${baseUrl}.`;
-          for (const char of response) {
-            yield {
-              choices: [
-                {
-                  delta: { content: char },
-                },
-              ],
-            };
-            await new Promise((resolve) => setTimeout(resolve, 20));
-          }
-        },
-      },
-    },
-  };
 }
 
 function Message({
@@ -72,7 +30,7 @@ function Message({
       </Text>
       {msg.role === "assistant" && showReasoning && msg.reasoning && (
         <Box marginLeft={2}>
-          <Text color="cyan">Reasoning: {msg.reasoning}</Text>
+          <Text color="gray">Reasoning: {msg.reasoning}</Text>
         </Box>
       )}
       <Box marginLeft={2}>
@@ -105,11 +63,12 @@ export default function Repl({
     "Type /models to see available models",
     "Use /use <model> to switch models",
     "Use /current to see current model",
+    "Use /clear to clear chat history",
     "Use /exit to quit",
   ]);
   const { write } = useStdout();
 
-  const openaiRef = useRef<OpenAIClient | null>(null);
+  const openaiRef = useRef<OpenAI | null>(null);
 
   useEffect(() => {
     openaiRef.current = createOpenAIClient(baseUrl);
@@ -133,19 +92,35 @@ export default function Repl({
       return;
     }
 
+    // Handle /clear command
+    if (content.toLowerCase() === "/clear") {
+      setMessages([]);
+      setSuggestions([
+        "Type /models to see available models",
+        "Use /use <model> to switch models",
+        "Use /current to see current model",
+        "Use /clear to clear chat history",
+        "Use /exit to quit",
+      ]);
+      return;
+    }
+
     // Handle /models or /list command
     if (
       content.toLowerCase() === "/models" ||
       content.toLowerCase() === "/list"
     ) {
       try {
-        const models = await listModels(baseUrl);
+        const openai = openaiRef.current;
+        if (!openai) {
+          throw new Error("OpenAI client not initialized");
+        }
+        const models = await listOpenAIModels(openai);
         setAvailableModels(models);
         if (models.length === 0) {
           const msg: ChatMessage = {
             role: "assistant",
-            content:
-              "No models available. Use /mappings to add model mappings on the controller.",
+            content: "No models available from the OpenAI API.",
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, msg]);
@@ -163,6 +138,7 @@ export default function Repl({
         setSuggestions([
           "Type /use <model> to switch to a model",
           "Use /current to see current model",
+          "Use /clear to clear chat history",
         ]);
       } catch (error) {
         const msg: ChatMessage = {
@@ -191,6 +167,7 @@ export default function Repl({
       setSuggestions([
         "Type /models to see all available models",
         "Use /use <model> to switch models",
+        "Use /clear to clear chat history",
       ]);
       return;
     }
@@ -216,6 +193,7 @@ export default function Repl({
         setSuggestions([
           "Type /models to see all available models",
           "Use /current to see current model",
+          "Use /clear to clear chat history",
         ]);
       } else {
         // Try to set it anyway (might be a valid model not in the list yet)
@@ -229,6 +207,7 @@ export default function Repl({
         setSuggestions([
           "Type /models to see all available models",
           "Use /current to see current model",
+          "Use /clear to clear chat history",
         ]);
       }
       return;
@@ -255,16 +234,6 @@ export default function Repl({
         throw new Error("OpenAI client not initialized");
       }
 
-      const stream = await openai.chat.completions.create({
-        model,
-        messages: [...messages, userMsg].map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-        max_tokens: 2048,
-        stream: true,
-      });
-
       let assistantContent = "";
       const assistantMsg: ChatMessage = {
         role: "assistant",
@@ -273,12 +242,15 @@ export default function Repl({
       };
       setMessages((prev: ChatMessage[]) => [...prev, assistantMsg]);
 
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta as any;
-        const contentDelta = delta?.content;
-
-        if (contentDelta) {
-          assistantContent += contentDelta;
+      await chat(
+        openai,
+        model,
+        [...messages, userMsg].map((m) => ({
+          role: m.role as "user" | "assistant" | "system",
+          content: m.content,
+        })),
+        (chunk) => {
+          assistantContent += chunk;
           setMessages((prev: ChatMessage[]) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
@@ -288,7 +260,7 @@ export default function Repl({
             return updated;
           });
         }
-      }
+      );
     } catch (error) {
       const errorMsg: ChatMessage = {
         role: "assistant",
