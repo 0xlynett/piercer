@@ -235,9 +235,11 @@ export default function Repl({
       }
 
       let assistantContent = "";
+      let assistantReasoning = "";
       const assistantMsg: ChatMessage = {
         role: "assistant",
         content: "",
+        reasoning: undefined,
         timestamp: new Date(),
       };
       setMessages((prev: ChatMessage[]) => [...prev, assistantMsg]);
@@ -249,13 +251,15 @@ export default function Repl({
           role: m.role as "user" | "assistant" | "system",
           content: m.content,
         })),
-        (chunk) => {
-          assistantContent += chunk;
+        (chunk, reasoningChunk) => {
+          if (chunk) assistantContent += chunk;
+          if (reasoningChunk) assistantReasoning += reasoningChunk;
           setMessages((prev: ChatMessage[]) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
               ...assistantMsg,
               content: assistantContent,
+              reasoning: showReasoning ? assistantReasoning : undefined,
             };
             return updated;
           });
@@ -445,7 +449,7 @@ export default function Repl({
       {/* Status bar */}
       <Box borderStyle="single" borderColor="blue" paddingX={1}>
         <Text>
-          Model: {model} | Reasoning: {showReasoning ? "ON" : "OFF"}
+          Model: {model} | reasoning: {showReasoning ? "on" : "off"}
         </Text>
       </Box>
 

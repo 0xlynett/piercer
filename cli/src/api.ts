@@ -128,7 +128,7 @@ export async function chat(
     role: "user" | "assistant" | "system" | "tool";
     content: string;
   }>,
-  onChunk: (content: string) => void
+  onChunk: (content: string, reasoningContent?: string) => void
 ): Promise<void> {
   const stream = await client.chat.completions.create({
     model,
@@ -138,9 +138,13 @@ export async function chat(
   });
 
   for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content;
+    const delta = chunk.choices[0]?.delta as any;
     if (delta) {
-      onChunk(delta);
+      const content = delta.content;
+      const reasoning = delta.reasoning_content;
+      if (content || reasoning) {
+        onChunk(content || "", reasoning || undefined);
+      }
     }
   }
 }

@@ -193,7 +193,7 @@ const app = new Hono()
           wsHandler.handleConnection(ws, c.req.raw);
         },
         onMessage: (evt, ws) => {
-          console.log("Server received raw message:", evt.data);
+          //console.log("Server received raw message:", evt.data);
           transport.handleMessage(ws, evt.data);
         },
         onClose: (evt, ws) => {

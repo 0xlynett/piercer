@@ -1,5 +1,5 @@
 import type { EventEmitter } from "events";
-export {WebSocketTransport} from "./ws-transport"
+export { WebSocketTransport } from "./ws-transport";
 
 export interface Transport extends EventEmitter {
   send(message: any, clientId?: string): void;
@@ -36,7 +36,6 @@ export class RPC<T extends Record<string, Function>> {
               params: args,
               id,
             };
-            console.log("sending");
             this.transport.send(request, clientId);
             return new Promise((resolve, reject) => {
               this.pendingRequests.set(id, { resolve, reject });
@@ -56,7 +55,7 @@ export class RPC<T extends Record<string, Function>> {
   }
 
   private handleMessage(message: any, clientId?: string): void {
-    console.log(`Received message for ${clientId}:`, message);
+    //console.log(`Received message for ${clientId}:`, message);
     if (message.id && this.pendingRequests.has(message.id)) {
       const promise = this.pendingRequests.get(message.id);
       if (promise) {
