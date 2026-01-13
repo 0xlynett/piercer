@@ -3,101 +3,36 @@ import { Command } from "commander";
 import chalk from "chalk";
 import OpenAI from "openai";
 import blessed from "blessed";
+import type {
+  ControllerInfo,
+  Agent,
+  ModelMapping,
+  ChatMessage,
+} from "./types.js";
+import {
+  fetchControllerInfo,
+  checkHealth,
+  listAgents,
+  listMappings,
+  addMapping,
+  removeMapping,
+  downloadModel,
+  createOpenAIClient,
+} from "./api.js";
+import { handleError as handleErrorUtil, setupSignalHandler } from "./utils.js";
 
 const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:3000";
 
-// Type definitions for API responses
-interface ControllerInfo {
-  name: string;
-  version: string;
-}
-
-interface Agent {
-  id: string;
-  name: string;
-  loadedModels: string[];
-  installedModels: string[];
-  pendingRequests: number;
-  status?: string;
-  vram_used?: number;
-  vram_total?: number;
-}
-
-interface ModelMapping {
-  public_name: string;
-  internal_name: string;
-}
-
-// Message types for chat TUI
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  reasoning?: string;
-  timestamp: Date;
-}
-
-function getBaseUrl(url: string): string {
-  return url.replace(/\/$/, "");
-}
-
-async function request<T>(
-  baseUrl: string,
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const url = `${baseUrl}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
-  }
-
-  return res.json() as Promise<T>;
-}
-
+// Error handler wrapper
 function handleError(fn: (...args: any[]) => Promise<void>) {
   return async (...args: any[]) => {
     try {
       await fn(...args);
     } catch (error) {
-      console.error(
-        chalk.red("Error:"),
-        error instanceof Error ? error.message : error
+      handleErrorUtil(
+        error instanceof Error ? error : new Error(String(error))
       );
-      process.exit(1);
     }
-  };
-}
-
-// Signal handler helper for streaming commands
-function setupSignalHandler(): { aborted: boolean; cleanup: () => void } {
-  let aborted = false;
-
-  const handleSignal = () => {
-    if (!aborted) {
-      aborted = true;
-      console.error(chalk.yellow("\n[Stopped by user]"));
-    }
-  };
-
-  process.on("SIGINT", handleSignal);
-  process.on("SIGTERM", handleSignal);
-
-  return {
-    get aborted() {
-      return aborted;
-    },
-    cleanup: () => {
-      process.off("SIGINT", handleSignal);
-      process.off("SIGTERM", handleSignal);
-    },
   };
 }
 
@@ -107,10 +42,7 @@ async function startChatTUI(
   model: string,
   showReasoning: boolean
 ): Promise<void> {
-  const openai = new OpenAI({
-    baseURL: `${baseUrl}/v1`,
-    apiKey: process.env.API_KEY,
-  });
+  const openai = createOpenAIClient(baseUrl);
 
   // Message history
   const messages: ChatMessage[] = [];
@@ -138,7 +70,6 @@ async function startChatTUI(
     mouse: true,
     border: {
       type: "line",
-      fg: "#ffffff",
     },
     style: {
       fg: "white",
@@ -173,7 +104,6 @@ async function startChatTUI(
     inputOnFocus: true,
     border: {
       type: "line",
-      fg: "#4a9eff",
     },
     style: {
       fg: "white",
@@ -200,7 +130,7 @@ async function startChatTUI(
       fg: "#00ff88",
       bg: "transparent",
     },
-    content: "{bold}Processing...{/}",
+    content: "{bold}Processing...{/bold}",
     hidden: true,
   });
 
@@ -216,11 +146,11 @@ async function startChatTUI(
     let formattedMessage = "";
 
     if (msg.role === "user") {
-      formattedMessage = `{bold}{magenta-fg}[${timestamp}] You:{/}\n${msg.content}\n`;
+      formattedMessage = `{bold}{magenta-fg}[${timestamp}] You:{/magenta-fg}{/bold}\n${msg.content}\n`;
     } else {
-      formattedMessage = `{bold}{green-fg}[${timestamp}] Model:{/}\n`;
+      formattedMessage = `{bold}{green-fg}[${timestamp}] Model:{/green-fg}{/bold}\n`;
       if (showReasoning && msg.reasoning) {
-        formattedMessage += `{cyan-fg}Reasoning: ${msg.reasoning}{/}\n\n`;
+        formattedMessage += `{cyan-fg}Reasoning: ${msg.reasoning}{/cyan-fg}\n\n`;
       }
       formattedMessage += `{white-fg}${msg.content}{/}\n`;
     }
@@ -426,8 +356,8 @@ program
   .description("Show API information")
   .action(
     handleError(async () => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      const data = await request<ControllerInfo>(baseUrl, "/api/info");
+      const url = program.opts().url;
+      const data = await fetchControllerInfo(url);
       console.log(chalk.blue("Piercer Controller"));
       console.log(`Name: ${data.name}`);
       console.log(`Version: ${data.version}`);
@@ -439,11 +369,10 @@ program
   .description("Check API health")
   .action(
     handleError(async () => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      const url = `${baseUrl}/health`;
-      const res = await fetch(url);
+      const url = program.opts().url;
+      const healthy = await checkHealth(url);
 
-      if (res.ok) {
+      if (healthy) {
         console.log(chalk.green("✓ API is healthy"));
       } else {
         console.log(chalk.red("✗ API is unhealthy"));
@@ -461,8 +390,8 @@ agentsCommand
   .description("List all connected agents")
   .action(
     handleError(async () => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      const agents = await request<Agent[]>(baseUrl, "/management/agents");
+      const url = program.opts().url;
+      const agents = await listAgents(url);
 
       if (agents.length === 0) {
         console.log(chalk.yellow("No agents connected"));
@@ -507,11 +436,8 @@ mappingsCommand
   .description("List all model mappings")
   .action(
     handleError(async () => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      const mappings = await request<ModelMapping[]>(
-        baseUrl,
-        "/management/mappings"
-      );
+      const url = program.opts().url;
+      const mappings = await listMappings(url);
 
       if (mappings.length === 0) {
         console.log(chalk.yellow("No model mappings configured"));
@@ -532,11 +458,8 @@ mappingsCommand
   .description("Create a model mapping")
   .action(
     handleError(async (publicName: string, filename: string) => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      await request(baseUrl, "/management/mappings", {
-        method: "POST",
-        body: JSON.stringify({ public_name: publicName, filename }),
-      });
+      const url = program.opts().url;
+      await addMapping(url, publicName, filename);
       console.log(
         chalk.green(`✓ Mapping created: ${publicName} → ${filename}`)
       );
@@ -548,12 +471,8 @@ mappingsCommand
   .description("Delete a model mapping")
   .action(
     handleError(async (publicName: string) => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      await request(
-        baseUrl,
-        `/management/mappings/${encodeURIComponent(publicName)}`,
-        { method: "DELETE" }
-      );
+      const url = program.opts().url;
+      await removeMapping(url, publicName);
       console.log(chalk.green(`✓ Mapping removed: ${publicName}`));
     })
   );
@@ -565,15 +484,8 @@ program
   .description("Trigger model download on an agent")
   .action(
     handleError(async (agentId: string, modelUrl: string, filename: string) => {
-      const baseUrl = getBaseUrl(program.opts().url);
-      const result = await request<{ result?: string }>(
-        baseUrl,
-        `/management/agents/${encodeURIComponent(agentId)}/models/download`,
-        {
-          method: "POST",
-          body: JSON.stringify({ model_url: modelUrl, filename }),
-        }
-      );
+      const url = program.opts().url;
+      const result = await downloadModel(url, agentId, modelUrl, filename);
       console.log(chalk.green(`✓ Download started on agent ${agentId}`));
       console.log(`  URL: ${modelUrl}`);
       console.log(`  Filename: ${result.result || filename}`);
@@ -598,11 +510,8 @@ program
         message: string,
         options: { maxTokens?: string; showReasoning?: boolean }
       ) => {
-        const baseUrl = getBaseUrl(program.opts().url);
-        const openai = new OpenAI({
-          baseURL: `${baseUrl}/v1`,
-          apiKey: process.env.API_KEY,
-        });
+        const url = program.opts().url;
+        const openai = createOpenAIClient(url);
 
         console.log(chalk.gray(`Sending chat request to model: ${model}...`));
 
@@ -681,12 +590,12 @@ program
   .action(
     handleError(
       async (options: { model?: string; showReasoning?: boolean }) => {
-        const baseUrl = getBaseUrl(program.opts().url);
+        const url = program.opts().url;
         const model = options.model || "default";
         const showReasoning = options.showReasoning || false;
 
         console.log(chalk.gray("Starting chat TUI..."));
-        await startChatTUI(baseUrl, model, showReasoning);
+        await startChatTUI(url, model, showReasoning);
       }
     )
   );
@@ -708,11 +617,8 @@ program
         prompt: string,
         options: { maxTokens?: string }
       ) => {
-        const baseUrl = getBaseUrl(program.opts().url);
-        const openai = new OpenAI({
-          baseURL: `${baseUrl}/v1`,
-          apiKey: process.env.API_KEY,
-        });
+        const url = program.opts().url;
+        const openai = createOpenAIClient(url);
 
         console.log(
           chalk.gray(`Sending completion request to model: ${model}...`)
