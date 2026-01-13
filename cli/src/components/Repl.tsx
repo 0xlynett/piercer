@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
-import type { ChatMessage } from "../types.js";
+import type { ChatMessage, AvailableModel } from "../types.js";
+import { listModels } from "../api.js";
 
 interface ReplProps {
   baseUrl: string;
@@ -83,14 +84,16 @@ function Message({
 
 export default function Repl({
   baseUrl,
-  model,
+  model: initialModel,
   showReasoning,
   onExit,
 }: ReplProps) {
+  const [model, setModel] = useState(initialModel);
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      content: `Welcome to Piercer Chat! You're now talking to ${model}.\nType your message and press Enter to send.\nUse /exit to quit.`,
+      content: `Welcome to Piercer Chat! You're now talking to ${initialModel}.\nType your message and press Enter to send.\nUse /exit to quit.`,
       timestamp: new Date(),
     },
   ]);
@@ -98,6 +101,12 @@ export default function Repl({
   const [isProcessing, setIsProcessing] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [suggestions, setSuggestions] = useState<string[]>([
+    "Type /models to see available models",
+    "Use /use <model> to switch models",
+    "Use /current to see current model",
+    "Use /exit to quit",
+  ]);
   const { write } = useStdout();
 
   const openaiRef = useRef<OpenAIClient | null>(null);
@@ -115,10 +124,113 @@ export default function Repl({
     if (!input.trim() || isProcessing) return;
 
     const content = input.trim();
+    setInput("");
+    setSuggestions([]);
 
     // Handle /exit command
     if (content.toLowerCase() === "/exit") {
       onExit?.();
+      return;
+    }
+
+    // Handle /models or /list command
+    if (
+      content.toLowerCase() === "/models" ||
+      content.toLowerCase() === "/list"
+    ) {
+      try {
+        const models = await listModels(baseUrl);
+        setAvailableModels(models);
+        if (models.length === 0) {
+          const msg: ChatMessage = {
+            role: "assistant",
+            content:
+              "No models available. Use /mappings to add model mappings on the controller.",
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, msg]);
+        } else {
+          const modelList = models
+            .map((m) => `  - ${m.public_name}`)
+            .join("\n");
+          const msg: ChatMessage = {
+            role: "assistant",
+            content: `Available models:\n${modelList}`,
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, msg]);
+        }
+        setSuggestions([
+          "Type /use <model> to switch to a model",
+          "Use /current to see current model",
+        ]);
+      } catch (error) {
+        const msg: ChatMessage = {
+          role: "assistant",
+          content: `Error fetching models: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, msg]);
+      }
+      return;
+    }
+
+    // Handle /current or /model command
+    if (
+      content.toLowerCase() === "/current" ||
+      content.toLowerCase() === "/model"
+    ) {
+      const msg: ChatMessage = {
+        role: "assistant",
+        content: `Current model: ${model}`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, msg]);
+      setSuggestions([
+        "Type /models to see all available models",
+        "Use /use <model> to switch models",
+      ]);
+      return;
+    }
+
+    // Handle /use <model> or /select <model> command
+    const useMatch = content.match(/^\/use\s+(.+)$/i);
+    const selectMatch = content.match(/^\/select\s+(.+)$/i);
+    const modelName = useMatch?.[1] || selectMatch?.[1];
+    if (modelName) {
+      // Check if the model exists
+      const matchingModel = availableModels.find(
+        (m) => m.public_name.toLowerCase() === modelName.toLowerCase()
+      );
+
+      if (matchingModel) {
+        setModel(matchingModel.public_name);
+        const msg: ChatMessage = {
+          role: "assistant",
+          content: `Switched to model: ${matchingModel.public_name}`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, msg]);
+        setSuggestions([
+          "Type /models to see all available models",
+          "Use /current to see current model",
+        ]);
+      } else {
+        // Try to set it anyway (might be a valid model not in the list yet)
+        setModel(modelName);
+        const msg: ChatMessage = {
+          role: "assistant",
+          content: `Set model to: ${modelName}`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, msg]);
+        setSuggestions([
+          "Type /models to see all available models",
+          "Use /current to see current model",
+        ]);
+      }
       return;
     }
 
@@ -135,7 +247,6 @@ export default function Repl({
       setInputHistory((prev: string[]) => [...prev, content]);
     }
     setHistoryIndex(inputHistory.length + 1);
-    setInput("");
     setIsProcessing(true);
 
     try {
@@ -218,7 +329,7 @@ export default function Repl({
         if (historyIndex > 0) {
           const newIndex = historyIndex - 1;
           setHistoryIndex(newIndex);
-          setInput(inputHistory[newIndex]);
+          if (inputHistory[newIndex]) setInput(inputHistory[newIndex]);
         }
         return;
       }
@@ -227,7 +338,7 @@ export default function Repl({
         if (historyIndex < inputHistory.length - 1) {
           const newIndex = historyIndex + 1;
           setHistoryIndex(newIndex);
-          setInput(inputHistory[newIndex]);
+          if (inputHistory[newIndex]) setInput(inputHistory[newIndex]);
         } else {
           setHistoryIndex(inputHistory.length);
           setInput("");
@@ -279,8 +390,10 @@ export default function Repl({
           const newIndex = historyIndex - 1;
           setHistoryIndex(newIndex);
           const value = inputHistory[newIndex];
-          setRawInput(value);
-          setInput(value);
+          if (value) {
+            setRawInput(value);
+            setInput(value);
+          }
         }
         return;
       }
@@ -291,8 +404,10 @@ export default function Repl({
           const newIndex = historyIndex + 1;
           setHistoryIndex(newIndex);
           const value = inputHistory[newIndex];
-          setRawInput(value);
-          setInput(value);
+          if (value) {
+            setRawInput(value);
+            setInput(value);
+          }
         } else {
           setHistoryIndex(inputHistory.length);
           setRawInput("");
@@ -325,6 +440,7 @@ export default function Repl({
     model,
     baseUrl,
     onExit,
+    availableModels,
   ]);
 
   return (
@@ -345,11 +461,19 @@ export default function Repl({
         )}
       </Box>
 
+      {/* Command suggestions */}
+      {suggestions.length > 0 && (
+        <Box marginTop={1} marginBottom={1}>
+          <Text color="gray" dimColor>
+            {suggestions.join(" | ")}
+          </Text>
+        </Box>
+      )}
+
       {/* Status bar */}
       <Box borderStyle="single" borderColor="blue" paddingX={1}>
         <Text>
-          Model: {model} | Reasoning: {showReasoning ? "ON" : "OFF"} | /exit to
-          quit
+          Model: {model} | Reasoning: {showReasoning ? "ON" : "OFF"}
         </Text>
       </Box>
 
@@ -357,7 +481,7 @@ export default function Repl({
       <Box borderStyle="single" borderColor="gray" paddingX={1} marginTop={-1}>
         <Text color="gray">❯ </Text>
         <Text>{input}</Text>
-        <Text cursor={isProcessing ? " " : "█"} />
+        <Text>{isProcessing ? " " : "█"}</Text>
       </Box>
     </Box>
   );

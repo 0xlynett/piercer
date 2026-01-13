@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-import React from "react";
-import { render } from "ink";
 import { Command } from "commander";
 import chalk from "chalk";
 import OpenAI from "openai";
+import { render } from "ink";
+import React from "react";
 import type {
   ControllerInfo,
   Agent,
@@ -21,7 +21,7 @@ import {
   createOpenAIClient,
 } from "./api.js";
 import { handleError as handleErrorUtil, setupSignalHandler } from "./utils.js";
-import Repl from "./components/Repl.js";
+import InkRepl from "./components/InkRepl.js";
 
 const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:3000";
 
@@ -36,37 +36,6 @@ function handleError(fn: (...args: any[]) => Promise<void>) {
       );
     }
   };
-}
-
-// Ink REPL Component wrapper
-function InkRepl({
-  baseUrl,
-  model,
-  showReasoning,
-}: {
-  baseUrl: string;
-  model: string;
-  showReasoning: boolean;
-}) {
-  const [exit, setExit] = React.useState(false);
-
-  if (exit) {
-    return (
-      <>
-        {console.log(chalk.yellow("Goodbye!"))}
-        {process.exit(0)}
-      </>
-    );
-  }
-
-  return (
-    <Repl
-      baseUrl={baseUrl}
-      model={model}
-      showReasoning={showReasoning}
-      onExit={() => setExit(true)}
-    />
-  );
 }
 
 const program = new Command();
@@ -308,29 +277,34 @@ program
     )
   );
 
-// REPL/Chat TUI command - Uses Ink React renderer
+// REPL/Chat TUI command
 
 program
-  .command("repl")
-  .description("Start an interactive chat TUI")
-  .option("-m, --model <name>", "Model to use for chat", "default")
+  .command("repl [model]")
+  .description("Start an interactive REPL for chat completion")
   .option("-r, --show-reasoning", "Show reasoning content alongside response")
+  .option(
+    "--url <url>",
+    "Controller URL",
+    process.env.CONTROLLER_URL || "http://localhost:3000"
+  )
   .action(
-    handleError((options: { model?: string; showReasoning?: boolean }) => {
-      const url = program.opts().url;
-      const model = options.model || "default";
-      const showReasoning = options.showReasoning || false;
-
-      console.log(chalk.gray("Starting chat TUI..."));
-
-      // Use Ink's render function to render the REPL component
-      const app = render(
-        <InkRepl baseUrl={url} model={model} showReasoning={showReasoning} />
-      );
-
-      // Handle unmount
-      return app.waitUntilExit();
-    })
+    handleError(
+      async (
+        model: string | undefined,
+        options: { showReasoning?: boolean; url?: string }
+      ) => {
+        const url = options.url || DEFAULT_URL;
+        const app = render(
+          <InkRepl
+            baseUrl={url}
+            model={model || ""}
+            showReasoning={options.showReasoning || false}
+          />
+        );
+        return app.waitUntilExit();
+      }
+    )
   );
 
 // Completion command

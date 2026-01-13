@@ -4,6 +4,7 @@ import type {
   Agent,
   ModelMapping,
   DownloadResult,
+  AvailableModel,
 } from "./types.js";
 
 export function getBaseUrl(url: string): string {
@@ -53,6 +54,18 @@ export async function listAgents(url: string): Promise<Agent[]> {
 export async function listMappings(url: string): Promise<ModelMapping[]> {
   const baseUrl = getBaseUrl(url);
   return request<ModelMapping[]>(baseUrl, "/management/mappings");
+}
+
+export async function listModels(url: string): Promise<AvailableModel[]> {
+  const baseUrl = getBaseUrl(url);
+  const mappings = await request<ModelMapping[]>(
+    baseUrl,
+    "/management/mappings"
+  );
+  return mappings.map((m) => ({
+    public_name: m.public_name,
+    internal_name: m.internal_name,
+  }));
 }
 
 export async function addMapping(

@@ -19,6 +19,11 @@ export interface ModelMapping {
   internal_name: string;
 }
 
+export interface AvailableModel {
+  public_name: string;
+  internal_name: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;

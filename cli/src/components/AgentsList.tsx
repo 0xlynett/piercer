@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { Agent } from "../types.js";
+import type { Agent } from "../types";
 
 interface AgentsListProps {
   agents: Agent[];

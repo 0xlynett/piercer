@@ -34,28 +34,20 @@ export default function MappingsList({ mappings }: MappingsListProps) {
 
       {/* Header */}
       <Box>
-        <Text color="gray" dim>
-          {"Public Name".padEnd(maxPublicNameLength)}
-        </Text>
+        <Text color="gray">{"Public Name".padEnd(maxPublicNameLength)}</Text>
         <Text> </Text>
         <Text color="gray">→</Text>
         <Text> </Text>
-        <Text color="gray" dim>
-          {"Internal Name".padEnd(maxInternalLength)}
-        </Text>
+        <Text color="gray">{"Internal Name".padEnd(maxInternalLength)}</Text>
       </Box>
 
       {/* Separator */}
       <Box>
-        <Text color="gray" dim>
-          {"─".repeat(maxPublicNameLength)}
-        </Text>
+        <Text color="gray">{"─".repeat(maxPublicNameLength)}</Text>
         <Text> </Text>
         <Text color="gray">→</Text>
         <Text> </Text>
-        <Text color="gray" dim>
-          {"─".repeat(maxInternalLength)}
-        </Text>
+        <Text color="gray">{"─".repeat(maxInternalLength)}</Text>
       </Box>
 
       {/* Mappings */}
