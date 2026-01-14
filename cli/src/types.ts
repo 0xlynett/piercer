@@ -29,6 +29,7 @@ export interface ChatMessage {
   content: string;
   reasoning?: string;
   timestamp: Date;
+  internal?: boolean;
 }
 
 export interface CLIConfig {

@@ -53,6 +53,7 @@ export default function Repl({
       role: "assistant",
       content: `Welcome to Piercer Chat! You're now talking to ${initialModel}.\nType your message and press Enter to send.\nUse /exit to quit.`,
       timestamp: new Date(),
+      internal: true,
     },
   ]);
   const [input, setInput] = useState("");
@@ -122,6 +123,7 @@ export default function Repl({
             role: "assistant",
             content: "No models available from the OpenAI API.",
             timestamp: new Date(),
+            internal: true,
           };
           setMessages((prev) => [...prev, msg]);
         } else {
@@ -132,6 +134,7 @@ export default function Repl({
             role: "assistant",
             content: `Available models:\n${modelList}`,
             timestamp: new Date(),
+            internal: true,
           };
           setMessages((prev) => [...prev, msg]);
         }
@@ -162,6 +165,7 @@ export default function Repl({
         role: "assistant",
         content: `Current model: ${model}`,
         timestamp: new Date(),
+        internal: true,
       };
       setMessages((prev) => [...prev, msg]);
       setSuggestions([
@@ -188,6 +192,7 @@ export default function Repl({
           role: "assistant",
           content: `Switched to model: ${matchingModel.public_name}`,
           timestamp: new Date(),
+          internal: true,
         };
         setMessages((prev) => [...prev, msg]);
         setSuggestions([
@@ -202,6 +207,7 @@ export default function Repl({
           role: "assistant",
           content: `Set model to: ${modelName}`,
           timestamp: new Date(),
+          internal: true,
         };
         setMessages((prev) => [...prev, msg]);
         setSuggestions([
@@ -247,10 +253,12 @@ export default function Repl({
       await chat(
         openai,
         model,
-        [...messages, userMsg].map((m) => ({
-          role: m.role as "user" | "assistant" | "system",
-          content: m.content,
-        })),
+        [...messages, userMsg]
+          .filter((m) => !m.internal)
+          .map((m) => ({
+            role: m.role as "user" | "assistant" | "system",
+            content: m.content,
+          })),
         (chunk, reasoningChunk) => {
           if (chunk) assistantContent += chunk;
           if (reasoningChunk) assistantReasoning += reasoningChunk;

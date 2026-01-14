@@ -1,1 +1,1 @@
-{"mcpServers":{"context7":{"command":"bunx","args":["-y","@upstash/context7-mcp"],"env":{"DEFAULT_MINIMUM_TOKENS":""},"alwaysAllow":["resolve-library-id"]}}}
+{"mcpServers":{"context7":{"command":"bunx","args":["-y","@upstash/context7-mcp"],"env":{"DEFAULT_MINIMUM_TOKENS":""},"alwaysAllow":["resolve-library-id","query-docs"]}}}
