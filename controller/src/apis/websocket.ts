@@ -95,6 +95,12 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
       return;
     }
 
+    // Store agent ID in ws.raw for reliable identification during disconnect/error events
+    if (!ws.raw) {
+      ws.raw = {} as any;
+    }
+    (ws.raw as any).agentId = agentId;
+
     // Check for duplicate agent ID - kick out old one and accept new one
     if (this.connectedAgents.has(agentId)) {
       const oldWs = this.transport.getClient(agentId);
@@ -136,7 +142,14 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
     code: number,
     reason: string
   ): void {
-    const agentId = this.transport.getClientId(ws);
+    // Try to get agent ID from ws.raw first (primary method), fallback to transport
+    let agentId: string | undefined;
+    if (ws.raw && (ws.raw as any).agentId) {
+      agentId = (ws.raw as any).agentId;
+    } else {
+      agentId = this.transport.getClientId(ws);
+    }
+
     if (!agentId) return;
 
     this.transport.removeClient(ws);
@@ -154,7 +167,14 @@ export class PiercerWebSocketHandler implements WebSocketHandler {
   }
 
   public handleError(ws: WSContext, error: Error): void {
-    const agentId = this.transport.getClientId(ws);
+    // Try to get agent ID from ws.raw first (primary method), fallback to transport
+    let agentId: string | undefined;
+    if (ws.raw && (ws.raw as any).agentId) {
+      agentId = (ws.raw as any).agentId;
+    } else {
+      agentId = this.transport.getClientId(ws);
+    }
+
     if (agentId) {
       this.logger.agentError(agentId, error);
     } else {

@@ -208,15 +208,37 @@ describe("PiercerWebSocketHandler", () => {
       wsHandler.handleConnection(mockWsContext, req);
       expect(wsHandler.isAgentConnected("agent-1")).toBe(true);
 
-      // Mock transport to return agentId
-      (transport.getClientId as any).mockReturnValue("agent-1");
+      // Verify agent ID is stored in ws.raw
+      expect(mockWsContext.raw.agentId).toBe("agent-1");
 
-      // Disconnect
+      // Disconnect - ws.raw.agentId should be used as primary method
       wsHandler.handleDisconnection(mockWsContext, 1000, "Normal closure");
 
       expect(transport.removeClient).toHaveBeenCalledWith(mockWsContext);
       expect(wsHandler.isAgentConnected("agent-1")).toBe(false);
       expect(agentManager.getAgent("agent-1")).toBeUndefined();
+    });
+
+    test("should use ws.raw.agentId for identification during error events", () => {
+      // Setup connection
+      const req = new Request("http://localhost/ws", {
+        headers: {
+          "agent-id": "agent-error-test",
+          "agent-name": "test-agent",
+        },
+      });
+      wsHandler.handleConnection(mockWsContext, req);
+      expect(wsHandler.isAgentConnected("agent-error-test")).toBe(true);
+
+      // Verify agent ID is stored in ws.raw
+      expect(mockWsContext.raw.agentId).toBe("agent-error-test");
+
+      // Simulate error - should use ws.raw.agentId
+      const testError = new Error("Test error");
+      wsHandler.handleError(mockWsContext, testError);
+
+      // No specific assertion needed, just verify no error is thrown
+      // The error handler should use ws.raw.agentId for logging
     });
   });
 
