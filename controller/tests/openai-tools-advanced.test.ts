@@ -12,13 +12,13 @@ import {
   closeAllTrackedTransports,
   trackTransport,
 } from "./shared/setup";
-import type { ControllerFunctions } from "../src/rpc-types";
-import { createServerInstance } from "../src/index";
+import type { AgentFunctions, ControllerFunctions } from "../src/rpc-types";
+import { createServerInstance } from "../src/module";
 
 describe("OpenAI API - Advanced Tool Scenarios", () => {
   let server: any;
   let container: any;
-  let rpc: RPC<any>;
+  let rpc: RPC<AgentFunctions>;
   let transport: WebSocketTransport;
   let API_URL: string;
   let WS_URL: string;

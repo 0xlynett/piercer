@@ -13,12 +13,12 @@ import {
   closeAllTrackedTransports,
 } from "./shared/setup";
 import type { ControllerFunctions } from "../src/rpc-types";
-import { createServerInstance } from "../src/index";
+import { createServerInstance } from "../src/module";
 
 describe("OpenAI API - Basic Chat Completion", () => {
   let server: any;
   let container: any;
-  let rpc: RPC<any>;
+  let rpc: RPC<ControllerFunctions>;
   let transport: WebSocketTransport;
   let API_URL: string;
   let WS_URL: string;
