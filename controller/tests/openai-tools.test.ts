@@ -7,11 +7,8 @@ import {
   afterEach,
 } from "bun:test";
 import { RPC, WebSocketTransport } from "@piercer/rpc";
-import {
-  parseSSEStream,
-  createDummyAgent,
-  closeAllTrackedTransports,
-} from "./shared/setup";
+import OpenAI from "openai";
+import { createDummyAgent, closeAllTrackedTransports } from "./shared/setup";
 import type { ControllerFunctions } from "../src/rpc-types";
 import { createServerInstance } from "../src/module";
 
@@ -25,6 +22,14 @@ describe("OpenAI API - Tool Calls", () => {
 
   // Generate unique test database path for isolation
   const TEST_DB = `/tmp/test-tools-${crypto.randomUUID()}.db`;
+
+  function getClient() {
+    return new OpenAI({
+      baseURL: API_URL + "/v1",
+      apiKey: "test-key",
+      dangerouslyAllowBrowser: true,
+    });
+  }
 
   afterEach(async () => {
     // Close transport after each test to prevent interference
@@ -205,65 +210,55 @@ describe("OpenAI API - Tool Calls", () => {
     transport = dummyAgent.transport;
     rpc = dummyAgent.rpc;
 
-    // 2. Send request with tools
+    // 2. Send request with tools using OpenAI SDK
     console.log("Sending chat completion request with tools...");
-    const response = await fetch(`${API_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "tool-model",
-        messages: [
-          { role: "user", content: "What's the weather in New York?" },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "get_weather",
-              description: "Get the current weather for a location",
-              parameters: {
-                type: "object",
-                properties: {
-                  location: {
-                    type: "string",
-                    description: "The city and state, e.g. San Francisco, CA",
-                  },
+    const client = getClient();
+    const completion = await client.chat.completions.create({
+      model: "tool-model",
+      messages: [{ role: "user", content: "What's the weather in New York?" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Get the current weather for a location",
+            parameters: {
+              type: "object",
+              properties: {
+                location: {
+                  type: "string",
+                  description: "The city and state, e.g. San Francisco, CA",
                 },
-                required: ["location"],
               },
+              required: ["location"],
             },
           },
-        ],
-        stream: false,
-      }),
+        },
+      ],
+      stream: false,
     });
 
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    console.log("Tool call response body:", body);
+    console.log("Tool call response:", completion);
 
     // Verify response structure
-    expect((body as any).id).toBe("chatcmpl-tool-123");
-    expect(body as any).toHaveProperty("object", "chat.completion");
-    expect(body as any).toHaveProperty("model", "tool-model");
-    expect(body as any).toHaveProperty("choices");
-    expect((body as any).choices).toHaveLength(1);
+    expect(completion.id).toBe("chatcmpl-tool-123");
+    expect(completion.object).toBe("chat.completion");
+    expect(completion.model).toBe("tool-model");
+    expect(completion.choices).toHaveLength(1);
 
     // Verify tool call in response
-    const choice = (body as any).choices[0];
-    expect(choice).toHaveProperty("message");
+    const choice = completion.choices[0]!;
     expect(choice.message).toHaveProperty("role", "assistant");
-    expect(choice.message).toHaveProperty("tool_calls");
     expect(choice.message.tool_calls).toHaveLength(1);
 
-    const toolCall = choice.message.tool_calls[0];
-    expect(toolCall).toHaveProperty("id", "call_123");
-    expect(toolCall).toHaveProperty("type", "function");
-    expect(toolCall.function).toHaveProperty("name", "get_weather");
-    expect(toolCall.function).toHaveProperty(
-      "arguments",
-      '{"location":"New York"}'
-    );
+    const toolCall = choice.message.tool_calls?.[0];
+    expect(toolCall).toBeDefined();
+    expect(toolCall?.id).toBe("call_123");
+    expect(toolCall?.type).toBe("function");
+    // Access function property directly as it exists on ChatCompletionMessageToolCall
+    const toolCallAny = toolCall as any;
+    expect(toolCallAny.function.name).toBe("get_weather");
+    expect(toolCallAny.function.arguments).toBe('{"location":"New York"}');
     expect(choice).toHaveProperty("finish_reason", "tool_calls");
   });
 
@@ -389,42 +384,40 @@ describe("OpenAI API - Tool Calls", () => {
     transport = dummyAgent.transport;
     rpc = dummyAgent.rpc;
 
-    // 2. Send streaming request with tools
+    // 2. Send streaming request with tools using OpenAI SDK
     console.log("Sending streaming chat completion request with tools...");
-    const response = await fetch(`${API_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "tool-model",
-        messages: [{ role: "user", content: "What's the weather in London?" }],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "get_weather",
-              description: "Get the current weather for a location",
-              parameters: {
-                type: "object",
-                properties: {
-                  location: {
-                    type: "string",
-                    description: "The city and state, e.g. San Francisco, CA",
-                  },
+    const client = getClient();
+    const stream = await client.chat.completions.create({
+      model: "tool-model",
+      messages: [{ role: "user", content: "What's the weather in London?" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Get the current weather for a location",
+            parameters: {
+              type: "object",
+              properties: {
+                location: {
+                  type: "string",
+                  description: "The city and state, e.g. San Francisco, CA",
                 },
-                required: ["location"],
               },
+              required: ["location"],
             },
           },
-        ],
-        stream: true,
-      }),
+        },
+      ],
+      stream: true,
     });
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/event-stream");
-
-    // 3. Parse SSE stream
-    const chunks = await parseSSEStream(response);
+    // 3. Collect chunks from stream
+    const chunks: any[] = [];
+    for await (const chunk of stream) {
+      console.log("Received chunk:", chunk);
+      chunks.push(chunk);
+    }
 
     // 4. Verify chunks
     console.log("Total streaming chunks received:", chunks.length);
@@ -436,7 +429,7 @@ describe("OpenAI API - Tool Calls", () => {
     );
     expect(toolCallChunk).toBeDefined();
 
-    const toolCall = toolCallChunk.choices[0].delta.tool_calls[0];
+    const toolCall = toolCallChunk.choices[0].delta.tool_calls?.[0];
     expect(toolCall).toHaveProperty("id", "call_456");
     expect(toolCall).toHaveProperty("type", "function");
     expect(toolCall.function).toHaveProperty("name", "get_weather");

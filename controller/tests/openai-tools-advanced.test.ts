@@ -7,6 +7,7 @@ import {
   afterEach,
 } from "bun:test";
 import { RPC, WebSocketTransport } from "@piercer/rpc";
+import OpenAI from "openai";
 import {
   createDummyAgent,
   closeAllTrackedTransports,
@@ -25,6 +26,14 @@ describe("OpenAI API - Advanced Tool Scenarios", () => {
 
   // Generate unique test database path for isolation
   const TEST_DB = `/tmp/test-tools-advanced-${crypto.randomUUID()}.db`;
+
+  function getClient() {
+    return new OpenAI({
+      baseURL: API_URL + "/v1",
+      apiKey: "test-key",
+      dangerouslyAllowBrowser: true,
+    });
+  }
 
   afterEach(async () => {
     // Close transport after each test to prevent interference
@@ -144,44 +153,36 @@ describe("OpenAI API - Advanced Tool Scenarios", () => {
     transport = dummyAgent.transport;
     rpc = dummyAgent.rpc;
 
-    // 2. Send initial request with tools
+    // 2. Send initial request with tools using OpenAI SDK
     console.log("Sending initial tool request...");
-    const response = await fetch(`${API_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "tool-model",
-        messages: [{ role: "user", content: "What's the weather in Paris?" }],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "get_weather",
-              description: "Get the current weather for a location",
-              parameters: {
-                type: "object",
-                properties: {
-                  location: {
-                    type: "string",
-                    description: "The city and state",
-                  },
+    const client = getClient();
+    const completion = await client.chat.completions.create({
+      model: "tool-model",
+      messages: [{ role: "user", content: "What's the weather in Paris?" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Get the current weather for a location",
+            parameters: {
+              type: "object",
+              properties: {
+                location: {
+                  type: "string",
+                  description: "The city and state",
                 },
-                required: ["location"],
               },
+              required: ["location"],
             },
           },
-        ],
-        stream: false,
-      }),
+        },
+      ],
+      stream: false,
     });
 
-    expect(response.status).toBe(200);
-    const initialBody = await response.json();
-    console.log("Initial response:", initialBody);
-
-    // Verify initial tool call
-    expect((initialBody as any).choices[0].message.tool_calls).toHaveLength(1);
-    const toolCallId = (initialBody as any).choices[0].message.tool_calls[0].id;
+    expect(completion.choices[0]?.message?.tool_calls).toHaveLength(1);
+    const toolCallId = completion.choices[0]?.message?.tool_calls?.[0]?.id;
 
     // 3. Send tool result back (continuation)
     // Close the first transport and create a new one for the continuation
@@ -246,47 +247,39 @@ describe("OpenAI API - Advanced Tool Scenarios", () => {
       transport.on("open", () => resolve());
     });
 
-    // Send continuation request with tool result
+    // Send continuation request with tool result using OpenAI SDK
     console.log("Sending continuation with tool result...");
-    const continuationResponse = await fetch(`${API_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "tool-model",
-        messages: [
-          { role: "user", content: "What's the weather in Paris?" },
-          {
-            role: "assistant",
-            tool_calls: [
-              {
-                id: toolCallId,
-                type: "function",
-                function: {
-                  name: "get_weather",
-                  arguments: '{"location":"Paris"}',
-                },
+    const continuationCompletion = await client.chat.completions.create({
+      model: "tool-model",
+      messages: [
+        { role: "user", content: "What's the weather in Paris?" },
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: toolCallId!,
+              type: "function",
+              function: {
+                name: "get_weather",
+                arguments: '{"location":"Paris"}',
               },
-            ],
-          },
-          {
-            role: "tool",
-            tool_call_id: toolCallId,
-            content: '{"temperature": "22°C", "condition": "sunny"}',
-          },
-        ],
-        stream: false,
-      }),
+            },
+          ],
+        },
+        {
+          role: "tool",
+          tool_call_id: toolCallId!,
+          content: '{"temperature": "22°C", "condition": "sunny"}',
+        },
+      ],
+      stream: false,
     });
 
-    expect(continuationResponse.status).toBe(200);
-    const continuationBody = await continuationResponse.json();
-    console.log("Continuation response:", continuationBody);
-
     // Verify final response
-    expect((continuationBody as any).choices[0].message.content).toBe(
+    expect(continuationCompletion.choices[0]?.message?.content).toBe(
       "The weather in Paris is sunny and 22°C."
     );
-    expect((continuationBody as any).choices[0]).toHaveProperty(
+    expect(continuationCompletion.choices[0]).toHaveProperty(
       "finish_reason",
       "stop"
     );
@@ -354,76 +347,61 @@ describe("OpenAI API - Advanced Tool Scenarios", () => {
     transport = dummyAgent.transport;
     rpc = dummyAgent.rpc;
 
-    // 2. Send request with tools
+    // 2. Send request with tools using OpenAI SDK
     console.log("Sending request with multiple tools...");
-    const response = await fetch(`${API_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "tool-model",
-        messages: [
-          { role: "user", content: "What's the weather and time in Tokyo?" },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "get_weather",
-              description: "Get the current weather for a location",
-              parameters: {
-                type: "object",
-                properties: {
-                  location: { type: "string" },
-                },
-                required: ["location"],
+    const client = getClient();
+    const completion = await client.chat.completions.create({
+      model: "tool-model",
+      messages: [
+        { role: "user", content: "What's the weather and time in Tokyo?" },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Get the current weather for a location",
+            parameters: {
+              type: "object",
+              properties: {
+                location: { type: "string" },
               },
+              required: ["location"],
             },
           },
-          {
-            type: "function",
-            function: {
-              name: "get_time",
-              description: "Get the current time for a timezone",
-              parameters: {
-                type: "object",
-                properties: {
-                  timezone: { type: "string" },
-                },
-                required: ["timezone"],
+        },
+        {
+          type: "function",
+          function: {
+            name: "get_time",
+            description: "Get the current time for a timezone",
+            parameters: {
+              type: "object",
+              properties: {
+                timezone: { type: "string" },
               },
+              required: ["timezone"],
             },
           },
-        ],
-        stream: false,
-      }),
+        },
+      ],
+      stream: false,
     });
 
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    console.log("Multiple tool calls response:", body);
-
     // Verify multiple tool calls in response
-    const toolCalls = (body as any).choices[0].message.tool_calls;
+    const toolCalls = completion.choices[0]?.message?.tool_calls;
     expect(toolCalls).toHaveLength(2);
 
-    expect(toolCalls[0]).toHaveProperty("id", "call_a");
-    expect(toolCalls[0].function).toHaveProperty("name", "get_weather");
-    expect(toolCalls[0].function).toHaveProperty(
-      "arguments",
-      '{"location":"Tokyo"}'
-    );
+    const toolCallAny = toolCalls as any[];
+    expect(toolCallAny[0].id).toBe("call_a");
+    expect(toolCallAny[0].function.name).toBe("get_weather");
+    expect(toolCallAny[0].function.arguments).toBe('{"location":"Tokyo"}');
 
-    expect(toolCalls[1]).toHaveProperty("id", "call_b");
-    expect(toolCalls[1].function).toHaveProperty("name", "get_time");
-    expect(toolCalls[1].function).toHaveProperty(
-      "arguments",
-      '{"timezone":"Asia/Tokyo"}'
-    );
+    expect(toolCallAny[1].id).toBe("call_b");
+    expect(toolCallAny[1].function.name).toBe("get_time");
+    expect(toolCallAny[1].function.arguments).toBe('{"timezone":"Asia/Tokyo"}');
 
-    expect((body as any).choices[0]).toHaveProperty(
-      "finish_reason",
-      "tool_calls"
-    );
+    expect(completion.choices[0]).toHaveProperty("finish_reason", "tool_calls");
   });
 
   test("Chat Completion with Invalid Tool Call (error handling)", async () => {
@@ -478,36 +456,28 @@ describe("OpenAI API - Advanced Tool Scenarios", () => {
     transport = dummyAgent.transport;
     rpc = dummyAgent.rpc;
 
-    // 2. Send request with tools
-    const response = await fetch(`${API_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "tool-model",
-        messages: [{ role: "user", content: "Do something invalid" }],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "non_existent_function",
-              description: "This function doesn't exist",
-              parameters: { type: "object", properties: {} },
-            },
+    // 2. Send request with tools using OpenAI SDK
+    const client = getClient();
+    const completion = await client.chat.completions.create({
+      model: "tool-model",
+      messages: [{ role: "user", content: "Do something invalid" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "non_existent_function",
+            description: "This function doesn't exist",
+            parameters: { type: "object", properties: {} },
           },
-        ],
-        stream: false,
-      }),
+        },
+      ],
+      stream: false,
     });
 
     // Should still return 200 with the tool call (validation happens client-side)
-    expect(response.status).toBe(200);
-    const body = await response.json();
-
-    // The tool call should be returned even if invalid
-    expect((body as any).choices[0].message.tool_calls).toHaveLength(1);
-    expect((body as any).choices[0].message.tool_calls[0].function.name).toBe(
-      "non_existent_function"
-    );
+    expect(completion.choices[0]?.message?.tool_calls).toHaveLength(1);
+    const toolCallAny = completion.choices[0]?.message?.tool_calls?.[0] as any;
+    expect(toolCallAny?.function?.name).toBe("non_existent_function");
   });
 
   test("Chat Completion with Empty Tool Arguments", async () => {
@@ -561,32 +531,26 @@ describe("OpenAI API - Advanced Tool Scenarios", () => {
     transport = dummyAgent.transport;
     rpc = dummyAgent.rpc;
 
-    const response = await fetch(`${API_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "tool-model",
-        messages: [{ role: "user", content: "Call a function with no args" }],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "no_args_function",
-              description: "A function that takes no arguments",
-              parameters: { type: "object", properties: {} },
-            },
+    const client = getClient();
+    const completion = await client.chat.completions.create({
+      model: "tool-model",
+      messages: [{ role: "user", content: "Call a function with no args" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "no_args_function",
+            description: "A function that takes no arguments",
+            parameters: { type: "object", properties: {} },
           },
-        ],
-        stream: false,
-      }),
+        },
+      ],
+      stream: false,
     });
 
-    expect(response.status).toBe(200);
-    const body = await response.json();
-
-    expect((body as any).choices[0].message.tool_calls).toHaveLength(1);
-    expect(
-      (body as any).choices[0].message.tool_calls[0].function.arguments
-    ).toBe("");
+    const toolCalls = completion.choices[0]?.message?.tool_calls;
+    expect(toolCalls).toHaveLength(1);
+    const toolCallAny = toolCalls?.[0] as any;
+    expect(toolCallAny?.function?.arguments).toBe("");
   });
 });

@@ -7,11 +7,8 @@ import {
   afterEach,
 } from "bun:test";
 import { RPC, WebSocketTransport } from "@piercer/rpc";
-import {
-  parseSSEStream,
-  createDummyAgent,
-  closeAllTrackedTransports,
-} from "./shared/setup";
+import OpenAI from "openai";
+import { createDummyAgent, closeAllTrackedTransports } from "./shared/setup";
 import type { ControllerFunctions } from "../src/rpc-types";
 import { createServerInstance } from "../src/module";
 
@@ -25,6 +22,14 @@ describe("OpenAI API - Basic Chat Completion", () => {
 
   // Generate unique test database path for isolation
   const TEST_DB = `/tmp/test-basic-${crypto.randomUUID()}.db`;
+
+  function getClient() {
+    return new OpenAI({
+      baseURL: API_URL + "/v1",
+      apiKey: "test-key",
+      dangerouslyAllowBrowser: true,
+    });
+  }
 
   afterEach(async () => {
     // Close transport after each test to prevent interference
@@ -137,23 +142,17 @@ describe("OpenAI API - Basic Chat Completion", () => {
     transport = dummyAgent.transport;
     rpc = dummyAgent.rpc;
 
-    // 2. Send Request
+    // 2. Send Request using OpenAI SDK
     console.log("Sending chat completion request...");
-    const response = await fetch(`${API_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "test-model",
-        messages: [{ role: "user", content: "Hi" }],
-        stream: false,
-      }),
+    const client = getClient();
+    const completion = await client.chat.completions.create({
+      model: "test-model",
+      messages: [{ role: "user", content: "Hi" }],
+      stream: false,
     });
-    console.log("Received response status:", response.status);
 
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    console.log("Response body:", body);
-    expect((body as any).choices[0].message.content).toBe("Hello World!");
+    console.log("Response:", completion);
+    expect(completion.choices[0]?.message?.content).toBe("Hello World!");
   });
 
   test("Chat Completion with Streaming (stream: true)", async () => {
@@ -203,24 +202,21 @@ describe("OpenAI API - Basic Chat Completion", () => {
     transport = dummyAgent.transport;
     rpc = dummyAgent.rpc;
 
-    // 2. Send Request with stream: true
+    // 2. Send streaming request using OpenAI SDK
     console.log("Sending streaming chat completion request...");
-    const response = await fetch(`${API_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "test-model",
-        messages: [{ role: "user", content: "Hi" }],
-        stream: true,
-      }),
+    const client = getClient();
+    const stream = await client.chat.completions.create({
+      model: "test-model",
+      messages: [{ role: "user", content: "Hi" }],
+      stream: true,
     });
-    console.log("Received streaming response status:", response.status);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/event-stream");
-
-    // 3. Parse SSE stream
-    const chunks = await parseSSEStream(response);
+    // 3. Collect chunks from stream
+    const chunks: any[] = [];
+    for await (const chunk of stream) {
+      console.log("Received chunk:", chunk);
+      chunks.push(chunk);
+    }
 
     // 4. Verify chunks
     console.log("Total chunks received:", chunks.length);
