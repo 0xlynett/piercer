@@ -110,7 +110,7 @@ If two agents of the same ID connect the controller, it should kick out the olde
 ## agent -> controller (agent calls these on controller)
 
 - `error()` - Any error happening on the agent as a result of a request or other
-- `receiveCompletion()` - Receives a completion stream via KKRPC
+- `receiveCompletion()` - Receives a completion stream via RPC
 
 # Special Agent Instructions
 

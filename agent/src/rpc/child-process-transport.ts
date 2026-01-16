@@ -80,6 +80,6 @@ export class ParentProcessTransport extends EventEmitter implements Transport {
   }
 
   close(): void {
-    process.disconnect();
+    process.disconnect!();
   }
 }

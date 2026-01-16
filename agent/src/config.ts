@@ -4,7 +4,6 @@ export interface AgentConfig {
   agentName: string;
   modelsDir: string;
   agentDataDir: string;
-  defaultContextSize: number;
   maxConcurrentModels: number;
   hardwarePollIntervalMs: number;
   vramBufferPercent: number;
@@ -18,7 +17,6 @@ export function loadConfig(): AgentConfig {
     agentName: process.env.AGENT_NAME || "Agent-1",
     modelsDir: process.env.MODELS_DIR || "./models",
     agentDataDir: process.env.AGENT_DATA_DIR || "./data",
-    defaultContextSize: parseInt(process.env.DEFAULT_CONTEXT_SIZE || "4096"),
     maxConcurrentModels: parseInt(process.env.MAX_CONCURRENT_MODELS || "3"),
     hardwarePollIntervalMs: parseInt(
       process.env.HARDWARE_POLL_INTERVAL_MS || "5000"

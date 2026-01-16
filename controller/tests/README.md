@@ -6,7 +6,7 @@ This directory contains tests for the Piercer controller server infrastructure.
 
 - `db.test.ts` - Tests for the database service (BunDatabase)
 - `logger.test.ts` - Tests for the logging service (PinoLogger)
-- `websocket.test.ts` - Tests for the WebSocket handler (KkrpcWebSocketHandler)
+- `websocket.test.ts` - Tests for the WebSocket handler (WebSocketHandler)
 
 ## Running Tests
 

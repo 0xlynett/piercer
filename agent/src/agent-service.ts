@@ -42,7 +42,6 @@ export class AgentService {
     this.processManager = new ProcessManager(
       {
         maxConcurrentModels: config.maxConcurrentModels,
-        defaultContextSize: config.defaultContextSize,
       },
       mainFunctions
     );

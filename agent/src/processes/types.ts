@@ -4,7 +4,7 @@ import type { RPC } from "@piercer/rpc";
  * RPC interface exposed by the inference child process
  */
 export type InferenceProcessFunctions = {
-  loadModel(params: { modelPath: string; contextSize: number }): Promise<{
+  loadModel(params: { modelPath: string }): Promise<{
     success: boolean;
     error?: string;
   }>;

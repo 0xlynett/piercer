@@ -6,16 +6,19 @@
 
 import {
   ChatHistoryItem,
+  ChatModelSegment,
   getLlama,
   LlamaChatSession,
   LlamaChatResponseChunk,
   LlamaCompletion,
-  LlamaCompletionOptions,
   Token,
   TokenBias,
+  LlamaContext,
+  Llama,
+  LlamaModel,
 } from "node-llama-cpp";
 import { RPC } from "@piercer/rpc";
-import { ParentProcessTransport } from "../rpc/child-process-transport.js";
+import { ParentProcessTransport } from "../rpc/child-process-transport";
 import type {
   InferenceProcessFunctions,
   MainProcessFunctions,
@@ -25,11 +28,13 @@ import type {
 } from "./types.js";
 
 // Single shared Llama instances
-let llama: any = null;
-let currentModel: any = null;
-let currentContext: any = null;
+let llama: Llama | null = null;
+let currentModel: LlamaModel | null = null;
+let currentContext: LlamaContext | null = null;
 
 let sequenceIndex = 0;
+
+const MAX_SEQUENCE_INDEX = 1;
 
 // Setup RPC communication with parent
 const transport = new ParentProcessTransport();
@@ -40,30 +45,22 @@ const parent = rpc.remote<MainProcessFunctions>();
  * Format a chat completion chunk with support for reasoning content and tool calls
  */
 function formatChatChunk(
-  text: string,
   requestId: string,
-  toolCalls?: any[],
-  content?: string,
-  reasoningContent?: string,
-  logprobs?: any
+  content: string | undefined,
+  reasoningContent: string | undefined,
+  toolCalls: any[] | undefined,
+  logprobs: any
 ) {
-  const choice: any = {
-    index: 0,
-    delta: {},
-    finish_reason: null,
-  };
+  const delta: any = {};
 
   if (reasoningContent !== undefined) {
-    choice.delta.reasoning_content = reasoningContent;
+    delta.reasoning_content = reasoningContent;
   }
   if (content !== undefined) {
-    choice.delta.content = content;
+    delta.content = content;
   }
   if (toolCalls && toolCalls.length > 0) {
-    choice.delta.tool_calls = toolCalls;
-  }
-  if (logprobs !== undefined) {
-    choice.logprobs = logprobs;
+    delta.tool_calls = toolCalls;
   }
 
   return {
@@ -71,7 +68,14 @@ function formatChatChunk(
     object: "chat.completion.chunk",
     created: Date.now(),
     model: "unknown",
-    choices: [choice],
+    choices: [
+      {
+        index: 0,
+        delta,
+        finish_reason: null,
+        logprobs: logprobs ?? null,
+      },
+    ],
   };
 }
 
@@ -86,7 +90,7 @@ function formatToolCallChunk(
     function: { name: string; arguments: string };
   }>
 ) {
-  return formatChatChunk("", requestId, toolCalls);
+  return formatChatChunk(requestId, undefined, undefined, toolCalls, null);
 }
 
 /**
@@ -161,7 +165,7 @@ function createTokenBias(
  */
 function mapParameters(params: CompletionParams | ChatParams, model: any) {
   const llamaParams: any = {
-    maxTokens: params.max_tokens ?? 1024,
+    maxTokens: params.max_tokens ?? 4096,
     temperature: params.temperature ?? 1,
     topP: params.top_p,
     stopStrings: params.stop,
@@ -219,7 +223,7 @@ const functions: InferenceProcessFunctions = {
 
       console.log("Creating context...");
       currentContext = await currentModel.createContext({
-        contextSize: params.contextSize,
+        sequences: MAX_SEQUENCE_INDEX,
       });
 
       console.log("Model loaded successfully");
@@ -241,12 +245,15 @@ const functions: InferenceProcessFunctions = {
     try {
       const llamaParams = mapParameters(params, currentModel);
 
-      const sequence = currentContext.getSequence(sequenceIndex);
+      if (currentContext.sequencesLeft == 0)
+        throw new Error("No sequences left");
+
+      const sequence = currentContext.getSequence();
       const completion = new LlamaCompletion({
         contextSequence: sequence,
       });
 
-      if (++sequenceIndex > 4) sequenceIndex = 0;
+      if (++sequenceIndex > MAX_SEQUENCE_INDEX) sequenceIndex = 0;
 
       // Track prompt tokens using tokenize
       const promptTokens = currentModel.tokenize(params.prompt).length;
@@ -291,6 +298,7 @@ const functions: InferenceProcessFunctions = {
       sequence.dispose();
     } catch (error: any) {
       console.error("Completion error:", error);
+
       await parent.receiveError({
         requestId: params.requestId,
         error: {
@@ -309,11 +317,16 @@ const functions: InferenceProcessFunctions = {
     try {
       const llamaParams = mapParameters(params, currentModel);
 
-      // Map messages to chat history, supporting reasoning content
+      // Map messages to chat history, supporting reasoning content and tool calls
       const history: ChatHistoryItem[] = params.messages.map((v) => {
-        if (v.role != "system" && v.role != "user" && v.role != "assistant")
+        if (
+          v.role != "system" &&
+          v.role != "user" &&
+          v.role != "assistant" &&
+          v.role != "tool"
+        )
           throw new Error(
-            `Incorrect role: ${v.role} is not one of system, user, assistant`
+            `Incorrect role: ${v.role} is not one of system, user, assistant, tool`
           );
 
         if (v.role == "system") {
@@ -326,16 +339,40 @@ const functions: InferenceProcessFunctions = {
             type: "user" as const,
             text: v.content,
           };
+        } else if (v.role == "tool") {
+          // Tool result message - convert to model response with function call result
+          return {
+            type: "model" as const,
+            response: [
+              {
+                type: "functionCall" as const,
+                name: v.tool_name || "",
+                params: {},
+                result: v.content,
+              },
+            ],
+          };
         } else {
+          // Assistant message
           const assistantItem: ChatHistoryItem = {
             type: "model" as const,
-            response: [v.content],
+            response: [],
           };
 
-          // If this message has reasoning_content, include it in response
+          // If this message has reasoning_content, include it as a segment
           if ("reasoning_content" in v && v.reasoning_content) {
-            // Include reasoning content as part of the response for context
-            assistantItem.response = [String(v.reasoning_content), v.content];
+            const reasoningSegment: ChatModelSegment = {
+              type: "segment",
+              segmentType: "thought",
+              text: v.reasoning_content,
+              ended: true,
+            };
+            assistantItem.response.push(reasoningSegment);
+          }
+
+          // Add the regular content
+          if (v.content) {
+            assistantItem.response.push(v.content);
           }
 
           return assistantItem;
@@ -343,36 +380,39 @@ const functions: InferenceProcessFunctions = {
       });
 
       console.log("Creating session...");
-      const sequence = currentContext.getSequence(sequenceIndex);
+      if (currentContext.sequencesLeft == 0)
+        throw new Error("No sequences left");
+
+      const sequence = currentContext.getSequence();
       const currentSession = new LlamaChatSession({
         contextSequence: sequence,
       });
 
-      if (++sequenceIndex > 4) sequenceIndex = 0;
+      // Set the chat history using the session's method
+      currentSession.setChatHistory(history);
+
+      if (++sequenceIndex > MAX_SEQUENCE_INDEX) sequenceIndex = 0;
 
       // Track token counts
       let promptTokens = 0;
       let completionTokens = 0;
       let thoughtTokens = 0;
 
-      // Calculate prompt tokens
-      for (const message of params.messages) {
-        promptTokens += currentModel.tokenize(message.content || "").length;
-      }
+      // Build ChatHistoryItem[] from chunks - accumulate response content
+      const responseContent: Array<string | ChatModelSegment> = [];
+      let currentSegment: ChatModelSegment | null = null;
+      let hasToolCall = false;
+      const toolCalls: Array<{
+        id: string;
+        type: string;
+        function: { name: string; arguments: string };
+      }> = [];
 
-      // Convert messages to a single prompt string for LlamaChatSession
-      const promptText = params.messages
-        .map((msg) => {
-          if (msg.role === "system") {
-            return `System: ${msg.content}`;
-          } else if (msg.role === "user") {
-            return `User: ${msg.content}`;
-          } else if (msg.role === "assistant") {
-            return `Assistant: ${msg.content}`;
-          }
-          return "";
-        })
-        .join("\n");
+      // Get the last user message for prompting
+      const lastUserMessage = params.messages
+        .filter((m) => m.role === "user")
+        .pop();
+      const promptText = lastUserMessage ? lastUserMessage.content : "";
 
       // Streaming mode: send chunks as they arrive
       await currentSession.prompt(promptText, {
@@ -390,21 +430,93 @@ const functions: InferenceProcessFunctions = {
             }
           }
 
-          // Handle reasoning chunks
-          const isReasoning =
+          // Handle different chunk types
+          if (chunk.type === "segment") {
+            // Handle reasoning/thought segments
+            const segmentType = chunk.segmentType as "thought" | "comment";
+
+            // Check for segment start/end via timestamps
+            const isSegmentStart = chunk.segmentStartTime !== undefined;
+            const isSegmentEnd = chunk.segmentEndTime !== undefined;
+
+            if (
+              currentSegment &&
+              currentSegment.segmentType === segmentType &&
+              !currentSegment.ended
+            ) {
+              // Continue current segment
+              currentSegment.text += chunk.text;
+              if (isSegmentEnd) {
+                currentSegment.ended = true;
+                currentSegment.endTime = chunk.segmentEndTime?.toISOString();
+                currentSegment = null;
+              }
+            } else if (isSegmentStart || chunk.text.length > 0) {
+              // Start new segment (or continue if we have text)
+              currentSegment = {
+                type: "segment",
+                segmentType,
+                text: chunk.text,
+                ended: isSegmentEnd,
+                startTime: chunk.segmentStartTime?.toISOString(),
+                endTime: chunk.segmentEndTime?.toISOString(),
+              };
+              responseContent.push(currentSegment);
+            }
+          } else {
+            // Regular text chunk (type is undefined for main response)
+            if (currentSegment && !currentSegment.ended) {
+              // Close any open segment before adding text
+              currentSegment.ended = true;
+              currentSegment = null;
+            }
+
+            // Add text to response
+            if (chunk.text.length > 0) {
+              responseContent.push(chunk.text);
+            }
+          }
+
+          // Format and send the chunk
+          const isThoughtSegment =
             chunk.type === "segment" && chunk.segmentType === "thought";
-          const content = isReasoning ? undefined : chunk.text;
-          const reasoningContent = isReasoning ? chunk.text : undefined;
+          const isCommentSegment =
+            chunk.type === "segment" && chunk.segmentType === "comment";
+          const content =
+            isThoughtSegment || isCommentSegment ? undefined : chunk.text;
+          const reasoningContent = isThoughtSegment ? chunk.text : undefined;
 
           const formattedChunk = formatChatChunk(
-            chunk.text,
             params.requestId,
-            undefined, // no tool calls in chunk
             content,
             reasoningContent,
+            hasToolCall ? toolCalls : undefined,
             params.logprobs
               ? { content: chunk.tokens?.map((t: any) => ({ token: t })) || [] }
-              : undefined
+              : null
+          );
+          parent.receiveChunk({
+            requestId: params.requestId,
+            data: formattedChunk,
+          });
+        },
+        onFunctionCall: (functionCall: any) => {
+          // Handle function call
+          hasToolCall = true;
+          const toolCall = {
+            id: functionCall.id || `tool-${toolCalls.length}`,
+            type: "function",
+            function: {
+              name: functionCall.functionName || "",
+              arguments: JSON.stringify(functionCall.params || {}),
+            },
+          };
+          toolCalls.push(toolCall);
+
+          // Send tool call chunk
+          const formattedChunk = formatToolCallChunk(
+            params.requestId,
+            toolCalls
           );
           parent.receiveChunk({
             requestId: params.requestId,
@@ -412,6 +524,12 @@ const functions: InferenceProcessFunctions = {
           });
         },
       });
+
+      // Build the final ChatHistoryItem with all segments
+      const finalResponse: ChatHistoryItem = {
+        type: "model",
+        response: responseContent,
+      };
 
       // Send completion signal with usage
       const usage: TokenUsage = {
@@ -430,6 +548,7 @@ const functions: InferenceProcessFunctions = {
       sequence.dispose();
     } catch (error: any) {
       console.error("Chat error:", error);
+
       await parent.receiveError({
         requestId: params.requestId,
         error: {

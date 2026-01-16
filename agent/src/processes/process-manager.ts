@@ -23,7 +23,6 @@ export class ProcessManager {
   constructor(
     private config: {
       maxConcurrentModels: number;
-      defaultContextSize: number;
     },
     mainFunctions: MainProcessFunctions
   ) {
@@ -98,7 +97,6 @@ export class ProcessManager {
     try {
       const result = await remote.loadModel({
         modelPath,
-        contextSize: this.config.defaultContextSize,
       });
 
       if (!result.success) {
@@ -179,9 +177,11 @@ export class ProcessManager {
       );
     }
 
-    const [modelName, _] = candidates[0];
-    logger.info({ modelName }, "Unloading least used model");
-    await this.unloadModel(modelName);
+    const [modelName, _] = candidates[0]!;
+    if (modelName) {
+      logger.info({ modelName }, "Unloading least used model");
+      await this.unloadModel(modelName);
+    }
   }
 
   /**
