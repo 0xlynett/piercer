@@ -1033,6 +1033,8 @@ export class OpenAIAPIHandler {
     let response: ChatCompletionResponse | null = null;
     let fullContent = "";
     let fullReasoningContent = "";
+    const accumulatedToolCalls: any[] = [];
+    let assistantRoleSet = false;
 
     for (const chunk of chunks) {
       if (!response) {
@@ -1049,6 +1051,7 @@ export class OpenAIAPIHandler {
                 role: "assistant",
                 content: "",
                 reasoning_content: undefined,
+                tool_calls: [],
               },
               logprobs: null,
               finish_reason: "stop",
@@ -1062,14 +1065,56 @@ export class OpenAIAPIHandler {
         };
       }
 
-      // Accumulate content and reasoning_content from delta
+      // Accumulate content, reasoning_content, role, and tool_calls from delta
       if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta) {
-        if (chunk.choices[0].delta.content) {
-          fullContent += chunk.choices[0].delta.content;
+        const delta = chunk.choices[0].delta;
+
+        // Handle role (needed for tool calls)
+        if (delta.role && !assistantRoleSet) {
+          if (response.choices[0]) {
+            response.choices[0].message.role = delta.role;
+          }
+          assistantRoleSet = true;
         }
-        if (chunk.choices[0].delta.reasoning_content) {
-          fullReasoningContent += chunk.choices[0].delta.reasoning_content;
+
+        // Handle content
+        if (delta.content) {
+          fullContent += delta.content;
         }
+
+        // Handle reasoning_content
+        if (delta.reasoning_content) {
+          fullReasoningContent += delta.reasoning_content;
+        }
+
+        // Handle tool_calls
+        if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+          for (const toolCall of delta.tool_calls) {
+            // Find existing tool call by ID to update arguments
+            const existingIndex = accumulatedToolCalls.findIndex(
+              (tc) => tc.id === toolCall.id
+            );
+            if (existingIndex >= 0) {
+              // Update existing tool call
+              if (toolCall.function?.arguments) {
+                accumulatedToolCalls[existingIndex].function.arguments +=
+                  toolCall.function.arguments;
+              }
+            } else {
+              // Add new tool call
+              accumulatedToolCalls.push({
+                id: toolCall.id,
+                type: toolCall.type || "function",
+                function: {
+                  name: toolCall.function?.name || "",
+                  arguments: toolCall.function?.arguments || "",
+                },
+              });
+            }
+          }
+        }
+
+        // Handle finish_reason
         if (chunk.choices[0].finish_reason && response && response.choices[0]) {
           response.choices[0].finish_reason = chunk.choices[0].finish_reason;
         }
@@ -1084,6 +1129,9 @@ export class OpenAIAPIHandler {
       response.choices[0].message.content = fullContent;
       if (fullReasoningContent) {
         response.choices[0].message.reasoning_content = fullReasoningContent;
+      }
+      if (accumulatedToolCalls.length > 0) {
+        response.choices[0].message.tool_calls = accumulatedToolCalls;
       }
     }
 
