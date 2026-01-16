@@ -3,7 +3,7 @@ import { render, Text } from "ink";
 import { handleError as handleErrorUtil, setupSignalHandler } from "../utils";
 import Repl from "./Repl";
 
-const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:3000";
+const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:4080";
 
 // Error handler wrapper
 function handleError(fn: (...args: any[]) => Promise<void>) {

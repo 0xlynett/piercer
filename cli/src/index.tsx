@@ -16,7 +16,7 @@ import {
 import { handleError as handleErrorUtil, setupSignalHandler } from "./utils.js";
 import InkRepl from "./components/InkRepl.js";
 
-const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:3000";
+const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:4080";
 
 // Error handler wrapper
 function handleError(fn: (...args: any[]) => Promise<void>) {
@@ -279,7 +279,7 @@ program
   .option(
     "--url <url>",
     "Controller URL",
-    process.env.CONTROLLER_URL || "http://localhost:3000"
+    process.env.CONTROLLER_URL || "http://localhost:4080"
   )
   .action(
     handleError(

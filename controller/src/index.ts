@@ -30,15 +30,18 @@ interface AppConfig {
   agentSecretKey?: string;
 }
 
-const config: AppConfig = {
-  port: parseInt(process.env.PORT || "4080", 10),
-  host: process.env.HOST || "0.0.0.0",
-  databasePath: process.env.DATABASE_PATH || "./piercer.db",
-  corsOrigin: process.env.CORS_ORIGIN || "*",
-  logLevel: process.env.LOG_LEVEL || "info",
-  apiKey: process.env.API_KEY,
-  agentSecretKey: process.env.AGENT_SECRET_KEY,
-};
+// Get configuration from environment variables
+function getConfig(): AppConfig {
+  return {
+    port: parseInt(process.env.PORT || "4080", 10),
+    host: process.env.HOST || "0.0.0.0",
+    databasePath: process.env.DATABASE_PATH || "./piercer.db",
+    corsOrigin: process.env.CORS_ORIGIN || "*",
+    logLevel: process.env.LOG_LEVEL || "info",
+    apiKey: process.env.API_KEY,
+    agentSecretKey: process.env.AGENT_SECRET_KEY,
+  };
+}
 
 // Dependency Injection Container
 class DIContainer {
@@ -53,8 +56,11 @@ class DIContainer {
   private agentRPCService: AgentRPCService;
   private rpc: RPC<any>;
   private transport: BunTransport;
+  private config: AppConfig;
 
   constructor(config: AppConfig) {
+    this.config = config;
+
     // Initialize logger first (needed by other services)
     this.logger = new PinoLogger({ level: config.logLevel });
 
@@ -148,218 +154,279 @@ class DIContainer {
     return this.managementHandler;
   }
 
+  getConfig(): AppConfig {
+    return this.config;
+  }
+
   async shutdown(): Promise<void> {
     this.wsHandlerInstance.shutdown();
     this.db.close();
   }
+
+  createApp(): Hono {
+    const app = new Hono()
+      .use(
+        "/*",
+        cors({
+          origin: this.config.corsOrigin,
+          allowHeaders: [
+            "Content-Type",
+            "Authorization",
+            "agent-id",
+            "agent-name",
+          ],
+          allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+          credentials: true,
+        })
+      )
+      .use(
+        honoLogger((message) => {
+          this.getLogger().info(message);
+        })
+      )
+      .get("/health", (c) => {
+        return c.json({
+          status: "healthy",
+          timestamp: new Date().toISOString(),
+          uptime: process.uptime(),
+          connectedAgents:
+            this.getWebSocketHandler().getConnectedAgents().length,
+        });
+      })
+      .get(
+        "/ws",
+        upgradeWebSocket((c) => {
+          const wsHandler = this.getWebSocketHandler();
+          const transport = this.getTransport();
+
+          return {
+            onOpen: (evt, ws) => {
+              wsHandler.handleConnection(ws, c.req.raw);
+            },
+            onMessage: (evt, ws) => {
+              //console.log("Server received raw message:", evt.data);
+              transport.handleMessage(ws, evt.data);
+            },
+            onClose: (evt, ws) => {
+              wsHandler.handleDisconnection(ws, evt.code, evt.reason);
+            },
+            onError: (evt, ws) => {
+              wsHandler.handleError(
+                ws,
+                (evt as any).error || new Error("Unknown WebSocket error")
+              );
+            },
+          };
+        })
+      )
+      .get("/api/info", (c) => {
+        return c.json({
+          name: "Piercer Controller",
+          version: "1.0.0",
+          description: "LLM request load balancer controller",
+          endpoints: {
+            websocket: "/ws",
+            health: "/health",
+            api: "/api/info",
+            completions: "/v1/completions",
+            chatCompletions: "/v1/chat/completions",
+            models: "/v1/models",
+          },
+          connectedAgents:
+            this.getWebSocketHandler().getConnectedAgents().length,
+        });
+      })
+      .use("/v1/*", async (c, next) => {
+        const handler = this.getOpenAIHandler();
+        const middleware = handler.validateAPIKey();
+        return middleware(c, next);
+      })
+      .use("/v1/*", async (c, next) => {
+        const handler = this.getOpenAIHandler();
+        const middleware = handler.addRequestId();
+        await middleware(c, next);
+      })
+      .use("/v1/*", async (c, next) => {
+        const handler = this.getOpenAIHandler();
+        const middleware = handler.rateLimit();
+        return middleware(c, next);
+      })
+      .post("/v1/completions", async (c) => {
+        const handler = this.getOpenAIHandler();
+        return handler.handleCompletions(c);
+      })
+      .post("/v1/chat/completions", async (c) => {
+        const handler = this.getOpenAIHandler();
+        return handler.handleChatCompletions(c);
+      })
+      .get("/v1/models", async (c) => {
+        const handler = this.getOpenAIHandler();
+        return handler.handleModels(c);
+      })
+      .get("/management/agents", (c) => {
+        const handler = this.getManagementHandler();
+        return handler.listAgents(c);
+      })
+      .post("/management/mappings", (c) => {
+        const handler = this.getManagementHandler();
+        return handler.createModelMapping(c);
+      })
+      .get("/management/mappings", (c) => {
+        const handler = this.getManagementHandler();
+        return handler.listModelMappings(c);
+      })
+      .delete("/management/mappings/:publicName", (c) => {
+        const handler = this.getManagementHandler();
+        return handler.deleteModelMapping(c);
+      })
+      .post("/management/agents/:agentId/models/download", (c) => {
+        const handler = this.getManagementHandler();
+        return handler.downloadModel(c);
+      });
+
+    // Error handling middleware
+    app.onError((err, c) => {
+      this.getLogger().error("Request error", err, {
+        path: c.req.path,
+        method: c.req.method,
+        userAgent: c.req.header("user-agent"),
+      });
+
+      return c.json(
+        {
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An internal error occurred",
+          },
+        },
+        500
+      );
+    });
+
+    // 404 handler
+    app.notFound((c) => {
+      return c.json(
+        {
+          error: {
+            code: "NOT_FOUND",
+            message: `Route ${c.req.path} not found`,
+          },
+        },
+        404
+      );
+    });
+
+    return app;
+  }
+
+  startServer(): any {
+    const app = this.createApp();
+
+    const server = Bun.serve({
+      port: this.config.port,
+      hostname: this.config.host,
+      fetch: app.fetch,
+      websocket,
+    });
+
+    this.getLogger().info("Piercer Controller starting", {
+      port: this.config.port,
+      host: this.config.host,
+      databasePath: this.config.databasePath,
+      corsOrigin: this.config.corsOrigin,
+      logLevel: this.config.logLevel,
+    });
+
+    this.getLogger().info(
+      `Server running on http://${this.config.host}:${this.config.port}`
+    );
+    this.getLogger().info(
+      `WebSocket endpoint: ws://${this.config.host}:${this.config.port}/ws`
+    );
+    this.getLogger().info(
+      `Health check: http://${this.config.host}:${this.config.port}/health`
+    );
+    this.getLogger().info(
+      `API info: http://${this.config.host}:${this.config.port}/api/info`
+    );
+    this.getLogger().info(
+      `Completions API: http://${this.config.host}:${this.config.port}/v1/completions`
+    );
+    this.getLogger().info(
+      `Chat Completions API: http://${this.config.host}:${this.config.port}/v1/chat/completions`
+    );
+    this.getLogger().info(
+      `Models API: http://${this.config.host}:${this.config.port}/v1/models`
+    );
+
+    return server;
+  }
 }
 
-// Initialize dependency injection container
-const container = new DIContainer(config);
+// Factory function to create isolated app instances for testing
+export function createAppInstance(config?: Partial<AppConfig>): {
+  container: DIContainer;
+  app: Hono;
+  server?: any;
+} {
+  const defaultConfig = getConfig();
+  const finalConfig = { ...defaultConfig, ...config };
+  const container = new DIContainer(finalConfig);
+  const app = container.createApp();
 
-// Create Hono app
-const app = new Hono()
-  .use(
-    "/*",
-    cors({
-      origin: config.corsOrigin,
-      allowHeaders: ["Content-Type", "Authorization", "agent-id", "agent-name"],
-      allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      credentials: true,
-    })
-  )
-  .use(
-    honoLogger((message) => {
-      container.getLogger().info(message);
-    })
-  )
-  .get("/health", (c) => {
-    return c.json({
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      connectedAgents: container.getWebSocketHandler().getConnectedAgents()
-        .length,
-    });
-  })
-  .get(
-    "/ws",
-    upgradeWebSocket((c) => {
-      const wsHandler = container.getWebSocketHandler();
-      const transport = container.getTransport();
+  return { container, app };
+}
 
-      return {
-        onOpen: (evt, ws) => {
-          wsHandler.handleConnection(ws, c.req.raw);
-        },
-        onMessage: (evt, ws) => {
-          //console.log("Server received raw message:", evt.data);
-          transport.handleMessage(ws, evt.data);
-        },
-        onClose: (evt, ws) => {
-          wsHandler.handleDisconnection(ws, evt.code, evt.reason);
-        },
-        onError: (evt, ws) => {
-          wsHandler.handleError(
-            ws,
-            (evt as any).error || new Error("Unknown WebSocket error")
-          );
-        },
-      };
-    })
-  )
-  .get("/api/info", (c) => {
-    return c.json({
-      name: "Piercer Controller",
-      version: "1.0.0",
-      description: "LLM request load balancer controller",
-      endpoints: {
-        websocket: "/ws",
-        health: "/health",
-        api: "/api/info",
-        completions: "/v1/completions",
-        chatCompletions: "/v1/chat/completions",
-        models: "/v1/models",
-      },
-      connectedAgents: container.getWebSocketHandler().getConnectedAgents()
-        .length,
-    });
-  })
-  .use("/v1/*", async (c, next) => {
-    const handler = container.getOpenAIHandler();
-    const middleware = handler.validateAPIKey();
-    return middleware(c, next);
-  })
-  .use("/v1/*", async (c, next) => {
-    const handler = container.getOpenAIHandler();
-    const middleware = handler.addRequestId();
-    await middleware(c, next);
-  })
-  .use("/v1/*", async (c, next) => {
-    const handler = container.getOpenAIHandler();
-    const middleware = handler.rateLimit();
-    return middleware(c, next);
-  })
-  .post("/v1/completions", async (c) => {
-    const handler = container.getOpenAIHandler();
-    return handler.handleCompletions(c);
-  })
-  .post("/v1/chat/completions", async (c) => {
-    const handler = container.getOpenAIHandler();
-    return handler.handleChatCompletions(c);
-  })
-  .get("/v1/models", async (c) => {
-    const handler = container.getOpenAIHandler();
-    return handler.handleModels(c);
-  })
-  .get("/management/agents", (c) => {
-    const handler = container.getManagementHandler();
-    return handler.listAgents(c);
-  })
-  .post("/management/mappings", (c) => {
-    const handler = container.getManagementHandler();
-    return handler.createModelMapping(c);
-  })
-  .get("/management/mappings", (c) => {
-    const handler = container.getManagementHandler();
-    return handler.listModelMappings(c);
-  })
-  .delete("/management/mappings/:publicName", (c) => {
-    const handler = container.getManagementHandler();
-    return handler.deleteModelMapping(c);
-  })
-  .post("/management/agents/:agentId/models/download", (c) => {
-    const handler = container.getManagementHandler();
-    return handler.downloadModel(c);
-  });
+// Factory function to create and start server for testing
+export function createServerInstance(config?: Partial<AppConfig>): {
+  container: DIContainer;
+  server: any;
+} {
+  const defaultConfig = getConfig();
+  const finalConfig = { ...defaultConfig, ...config };
+  const container = new DIContainer(finalConfig);
+  const server = container.startServer();
 
-// Error handling middleware
-app.onError((err, c) => {
-  container.getLogger().error("Request error", err, {
-    path: c.req.path,
-    method: c.req.method,
-    userAgent: c.req.header("user-agent"),
-  });
+  return { container, server };
+}
 
-  return c.json(
-    {
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "An internal error occurred",
-      },
-    },
-    500
-  );
-});
-
-// 404 handler
-app.notFound((c) => {
-  return c.json(
-    {
-      error: {
-        code: "NOT_FOUND",
-        message: `Route ${c.req.path} not found`,
-      },
-    },
-    404
-  );
-});
-
-// Graceful shutdown handling
-const gracefulShutdown = async (signal: string) => {
-  container
-    .getLogger()
-    .info(`Received ${signal}, starting graceful shutdown...`);
-
-  await container.shutdown();
-
-  container.getLogger().info("Graceful shutdown completed");
-  process.exit(0);
-};
-
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-
-// Start server
-export const server = Bun.serve({
-  port: config.port,
-  hostname: config.host,
-  fetch: app.fetch,
-  websocket,
-});
-
-container.getLogger().info("Piercer Controller starting", {
-  port: config.port,
-  host: config.host,
-  databasePath: config.databasePath,
-  corsOrigin: config.corsOrigin,
-  logLevel: config.logLevel,
-});
-
-container
-  .getLogger()
-  .info(`Server running on http://${config.host}:${config.port}`);
-container
-  .getLogger()
-  .info(`WebSocket endpoint: ws://${config.host}:${config.port}/ws`);
-container
-  .getLogger()
-  .info(`Health check: http://${config.host}:${config.port}/health`);
-container
-  .getLogger()
-  .info(`API info: http://${config.host}:${config.port}/api/info`);
-container
-  .getLogger()
-  .info(`Completions API: http://${config.host}:${config.port}/v1/completions`);
-container
-  .getLogger()
-  .info(
-    `Chat Completions API: http://${config.host}:${config.port}/v1/chat/completions`
-  );
-container
-  .getLogger()
-  .info(`Models API: http://${config.host}:${config.port}/v1/models`);
+// Production default instance (only creates app, doesn't start server)
+const defaultContainer = new DIContainer(getConfig());
+const defaultApp = defaultContainer.createApp();
 
 // Export for testing and CLI client
-export default app;
-export type AppType = typeof app;
+export default defaultApp;
+export type AppType = typeof defaultApp;
+
+// Export the default container for backwards compatibility
+export { defaultContainer };
+
+// Only start the production server and graceful shutdown handlers if this file is run directly
+// This prevents the server from starting when the module is imported by tests
+const isMainModule =
+  process.argv[1]?.includes("controller/src/index.ts") ||
+  process.argv[1]?.includes("controller/dist/index.js") ||
+  process.argv[1]?.endsWith("index.ts") ||
+  process.argv[1]?.endsWith("index.js") ||
+  (process.argv[1]?.includes("piercer") && !process.argv[1]?.includes("test"));
+
+if (isMainModule) {
+  // Graceful shutdown handling
+  const gracefulShutdown = async (signal: string) => {
+    defaultContainer
+      .getLogger()
+      .info(`Received ${signal}, starting graceful shutdown...`);
+
+    await defaultContainer.shutdown();
+
+    defaultContainer.getLogger().info("Graceful shutdown completed");
+    process.exit(0);
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+  // Start default server in production
+
+  defaultContainer.startServer();
+}

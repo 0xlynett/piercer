@@ -12,21 +12,19 @@ import {
   closeAllTrackedTransports,
   trackTransport,
 } from "./shared/setup";
-import type { ControllerFunctions } from "../../src/rpc-types";
-
-// Set environment variables BEFORE importing the app
-const TEST_DB = `./test-tools-advanced-${crypto.randomUUID()}.db`;
-process.env.DATABASE_PATH = TEST_DB;
-process.env.PORT = "0"; // Random port
-process.env.API_KEY = ""; // No API key required for tests
-process.env.AGENT_SECRET_KEY = ""; // No agent secret key for tests
+import type { ControllerFunctions } from "../src/rpc-types";
+import { createServerInstance } from "../src/index";
 
 describe("OpenAI API - Advanced Tool Scenarios", () => {
   let server: any;
+  let container: any;
   let rpc: RPC<any>;
   let transport: WebSocketTransport;
   let API_URL: string;
   let WS_URL: string;
+
+  // Generate unique test database path for isolation
+  const TEST_DB = `/tmp/test-tools-advanced-${crypto.randomUUID()}.db`;
 
   afterEach(async () => {
     // Close transport after each test to prevent interference
@@ -37,14 +35,21 @@ describe("OpenAI API - Advanced Tool Scenarios", () => {
   });
 
   beforeAll(async () => {
-    // Dynamic import to ensure env vars are picked up
-    const mod = await import("../../src/index");
-    server = mod.server;
+    // Create isolated server instance with test-specific configuration
+    const { server: srv, container: cont } = createServerInstance({
+      databasePath: TEST_DB,
+      port: 1534,
+      apiKey: "",
+      agentSecretKey: "",
+      logLevel: "error", // Reduce noise in tests
+    });
+
+    server = srv;
+    container = cont;
 
     const port = server.port;
-    const hostname = server.hostname;
-    API_URL = `http://${hostname}:${port}`;
-    WS_URL = `ws://${hostname}:${port}/ws`;
+    API_URL = `http://127.0.0.1:${port}`;
+    WS_URL = `ws://127.0.0.1:${port}/ws`;
 
     // Create model mapping for tool-model
     const toolRes = await fetch(`${API_URL}/management/mappings`, {
@@ -73,7 +78,13 @@ describe("OpenAI API - Advanced Tool Scenarios", () => {
     // Close all tracked agent transports
     closeAllTrackedTransports();
 
+    // Shutdown container and stop server for proper cleanup
+    if (container) {
+      await container.shutdown();
+    }
     if (server) server.stop();
+
+    // Clean up test database file
     try {
       Bun.file(TEST_DB).delete();
     } catch {}
