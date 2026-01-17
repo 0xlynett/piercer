@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { render, Text } from "ink";
 import { handleError as handleErrorUtil, setupSignalHandler } from "../utils";
 import Repl from "./Repl";
+import type { ToolDefinition } from "../types";
 
 const DEFAULT_URL = process.env.CONTROLLER_URL || "http://localhost:4080";
 
@@ -23,10 +24,12 @@ function InkRepl({
   baseUrl,
   model,
   showReasoning,
+  tools,
 }: {
   baseUrl: string;
   model: string;
   showReasoning: boolean;
+  tools?: ToolDefinition[];
 }) {
   const [exit, setExit] = React.useState(false);
 
@@ -42,6 +45,7 @@ function InkRepl({
         baseUrl={baseUrl}
         model={model}
         showReasoning={showReasoning}
+        tools={tools}
         onExit={() => setExit(true)}
       />
       {exit && <Text color="yellow">Goodbye!</Text>}

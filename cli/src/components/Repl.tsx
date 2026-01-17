@@ -1,6 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
-import type { ChatMessage, AvailableModel } from "../types.js";
+import type {
+  ChatMessage,
+  AvailableModel,
+  ToolDefinition,
+  ToolCall,
+} from "../types.js";
 import { createOpenAIClient, chat, listOpenAIModels } from "../api.js";
 import type OpenAI from "openai";
 
@@ -8,6 +13,7 @@ interface ReplProps {
   baseUrl: string;
   model: string;
   showReasoning: boolean;
+  tools?: ToolDefinition[];
   onExit?: () => void;
 }
 
@@ -44,6 +50,7 @@ export default function Repl({
   baseUrl,
   model: initialModel,
   showReasoning,
+  tools = [],
   onExit,
 }: ReplProps) {
   const [model, setModel] = useState(initialModel);
@@ -51,7 +58,11 @@ export default function Repl({
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      content: `Welcome to Piercer Chat! You're now talking to ${initialModel}.\nType your message and press Enter to send.\nUse /exit to quit.`,
+      content: `Welcome to Piercer Chat! You're now talking to ${initialModel}.\nType your message and press Enter to send.\nUse /exit to quit.${
+        tools.length > 0
+          ? "\nAvailable tools: " + tools.map((t) => t.function.name).join(", ")
+          : ""
+      }`,
       timestamp: new Date(),
       internal: true,
     },
@@ -68,6 +79,39 @@ export default function Repl({
     "Use /exit to quit",
   ]);
   const { write } = useStdout();
+
+  // Execute a tool and return the result
+  const executeTool = (toolCall: ToolCall): string => {
+    const { name, arguments: args } = toolCall.function;
+
+    if (name === "quack") {
+      const duckArt = `>(')____,
+ (\` =~~/
+~^~^\`---'`;
+      return `${duckArt}${model} quacked!`;
+    }
+
+    if (name === "cowsay") {
+      try {
+        const parsed = JSON.parse(args);
+        const text = parsed.text || "";
+        const line = " " + "_".repeat(text.length + 2);
+        const bottomLine = " " + "-".repeat(text.length + 2);
+        return `${line}
+< ${text} >
+${bottomLine}
+        \\   ^__^
+         \\  (oo)\\_______
+            (__)\\       )\\/\\
+                ||----w |
+                ||     ||`;
+      } catch {
+        return `Error: Invalid arguments for cowsay tool`;
+      }
+    }
+
+    return `Unknown tool: ${name}`;
+  };
 
   const openaiRef = useRef<OpenAI | null>(null);
 
@@ -250,18 +294,63 @@ export default function Repl({
       };
       setMessages((prev: ChatMessage[]) => [...prev, assistantMsg]);
 
+      // Build messages array with hidden system prompt for tools if enabled
+      const toolDescription =
+        tools.length > 0
+          ? `\n\nYou have access to the following tools:\n${tools
+              .map((t) => {
+                if (t.function.name === "quack") {
+                  return "- quack: You have access to a 'quack' tool that displays a duck when called. It takes no arguments.";
+                }
+                if (t.function.name === "cowsay") {
+                  return "- cowsay: You have access to a 'cowsay' tool that displays text in a cow's voice. Use it when asked to cowsay something. It requires a 'text' argument with the message to display.";
+                }
+                return `- ${t.function.name}: ${
+                  t.function.description || "No description available"
+                }`;
+              })
+              .join("\n")}`
+          : "";
+
+      const apiMessages = [...messages, userMsg]
+        .filter((m) => !m.internal)
+        .map((m) => ({
+          role: m.role as "user" | "assistant" | "system",
+          content: m.content,
+          reasoning_content: m.reasoning,
+        }));
+
+      // Prepend hidden system message with tool descriptions if tools are enabled
+      if (tools.length > 0) {
+        apiMessages.unshift({
+          role: "system",
+          content: `You are a helpful AI assistant.${toolDescription}\nWhen you need to call a function, output your response in the format: <tool_call>{"name": "function_name", "arguments": {"arg1": "value"}}</tool_call>`,
+          reasoning_content: undefined,
+        });
+      }
+
       await chat(
         openai,
         model,
-        [...messages, userMsg]
-          .filter((m) => !m.internal)
-          .map((m) => ({
-            role: m.role as "user" | "assistant" | "system",
-            content: m.content,
-          })),
-        (chunk, reasoningChunk) => {
+        apiMessages,
+        (chunk, reasoningChunk, toolCalls) => {
           if (chunk) assistantContent += chunk;
           if (reasoningChunk) assistantReasoning += reasoningChunk;
+
+          // Handle tool calls - execute them and add to messages
+          if (toolCalls && toolCalls.length > 0) {
+            for (const tc of toolCalls) {
+              const result = executeTool(tc);
+              const toolResultMsg: ChatMessage = {
+                role: "tool",
+                content: result,
+                timestamp: new Date(),
+                internal: true,
+              };
+              setMessages((prev) => [...prev, toolResultMsg]);
+            }
+          }
+
           setMessages((prev: ChatMessage[]) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
@@ -271,7 +360,8 @@ export default function Repl({
             };
             return updated;
           });
-        }
+        },
+        tools
       );
     } catch (error) {
       const errorMsg: ChatMessage = {

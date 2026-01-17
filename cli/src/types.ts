@@ -25,7 +25,7 @@ export interface AvailableModel {
 }
 
 export interface ChatMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   content: string;
   reasoning?: string;
   timestamp: Date;
@@ -39,4 +39,32 @@ export interface CLIConfig {
 
 export interface DownloadResult {
   result?: string;
+}
+
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: "object";
+      properties: Record<
+        string,
+        {
+          type: string;
+          description: string;
+        }
+      >;
+      required?: string[];
+    };
+  };
+}
+
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
 }

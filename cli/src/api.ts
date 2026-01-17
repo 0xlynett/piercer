@@ -5,6 +5,8 @@ import type {
   ModelMapping,
   DownloadResult,
   AvailableModel,
+  ToolDefinition,
+  ToolCall,
 } from "./types.js";
 
 export function getBaseUrl(url: string): string {
@@ -127,23 +129,63 @@ export async function chat(
   messages: Array<{
     role: "user" | "assistant" | "system" | "tool";
     content: string;
+    reasoning_content?: string;
   }>,
-  onChunk: (content: string, reasoningContent?: string) => void
+  onChunk: (
+    content: string,
+    reasoningContent?: string,
+    toolCalls?: ToolCall[]
+  ) => void,
+  tools?: ToolDefinition[]
 ): Promise<void> {
   const stream = await client.chat.completions.create({
     model,
     messages: messages as any,
     max_tokens: 4096,
     stream: true,
+    tools: tools as any,
   });
+
+  let accumulatedToolCalls: ToolCall[] = [];
 
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta as any;
     if (delta) {
       const content = delta.content;
       const reasoning = delta.reasoning_content;
-      if (content || reasoning) {
-        onChunk(content || "", reasoning || undefined);
+
+      // Handle tool calls
+      if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const existingIndex = accumulatedToolCalls.findIndex(
+            (t) => t.id === tc.id
+          );
+          if (existingIndex >= 0) {
+            if (tc.function?.arguments && accumulatedToolCalls[existingIndex]) {
+              accumulatedToolCalls[existingIndex].function.arguments +=
+                tc.function.arguments;
+            }
+          } else {
+            accumulatedToolCalls.push({
+              id: tc.id,
+              type: tc.type || "function",
+              function: {
+                name: tc.function?.name || "",
+                arguments: tc.function?.arguments || "",
+              },
+            });
+          }
+        }
+      }
+
+      if (content || reasoning || accumulatedToolCalls.length > 0) {
+        onChunk(
+          content || "",
+          reasoning || undefined,
+          accumulatedToolCalls.length > 0
+            ? [...accumulatedToolCalls]
+            : undefined
+        );
       }
     }
   }

@@ -32,8 +32,6 @@ let llama: Llama | null = null;
 let currentModel: LlamaModel | null = null;
 let currentContext: LlamaContext | null = null;
 
-let sequenceIndex = 0;
-
 const MAX_SEQUENCE_INDEX = 1;
 
 // Setup RPC communication with parent
@@ -253,8 +251,6 @@ const functions: InferenceProcessFunctions = {
         contextSequence: sequence,
       });
 
-      if (++sequenceIndex > MAX_SEQUENCE_INDEX) sequenceIndex = 0;
-
       // Track prompt tokens using tokenize
       const promptTokens = currentModel.tokenize(params.prompt).length;
 
@@ -391,7 +387,7 @@ const functions: InferenceProcessFunctions = {
       // Set the chat history using the session's method
       currentSession.setChatHistory(history);
 
-      if (++sequenceIndex > MAX_SEQUENCE_INDEX) sequenceIndex = 0;
+      console.log(currentSession.getChatHistory());
 
       // Track token counts
       let promptTokens = 0;
@@ -524,12 +520,6 @@ const functions: InferenceProcessFunctions = {
           });
         },
       });
-
-      // Build the final ChatHistoryItem with all segments
-      const finalResponse: ChatHistoryItem = {
-        type: "model",
-        response: responseContent,
-      };
 
       // Send completion signal with usage
       const usage: TokenUsage = {

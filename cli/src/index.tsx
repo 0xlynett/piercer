@@ -276,6 +276,7 @@ program
   .command("repl [model]")
   .description("Start an interactive REPL for chat completion")
   .option("-r, --show-reasoning", "Show reasoning content alongside response")
+  .option("-t, --tools", "Enable tool calling with quack and cowsay tools")
   .option(
     "--url <url>",
     "Controller URL",
@@ -285,14 +286,53 @@ program
     handleError(
       async (
         model: string | undefined,
-        options: { showReasoning?: boolean; url?: string }
+        options: { showReasoning?: boolean; tools?: boolean; url?: string }
       ) => {
         const url = options.url || DEFAULT_URL;
+
+        // Define available tools in OpenAI format
+        const tools = options.tools
+          ? [
+              {
+                type: "function" as const,
+                function: {
+                  name: "quack",
+                  description: "Make the model quack like a duck",
+                  parameters: {
+                    type: "object" as const,
+                    properties: {} as Record<
+                      string,
+                      { type: string; description: string }
+                    >,
+                  },
+                },
+              },
+              {
+                type: "function" as const,
+                function: {
+                  name: "cowsay",
+                  description: "Make the model speak in a cow's voice",
+                  parameters: {
+                    type: "object" as const,
+                    properties: {
+                      text: {
+                        type: "string",
+                        description: "What the cow says",
+                      },
+                    },
+                    required: ["text"],
+                  },
+                },
+              },
+            ]
+          : [];
+
         const app = render(
           <InkRepl
             baseUrl={url}
             model={model || ""}
             showReasoning={options.showReasoning || false}
+            tools={tools}
           />
         );
         return app.waitUntilExit();
