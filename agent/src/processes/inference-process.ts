@@ -16,6 +16,7 @@ import {
   LlamaContext,
   Llama,
   LlamaModel,
+  defineChatSessionFunction,
 } from "node-llama-cpp";
 import { RPC } from "@piercer/rpc";
 import { ParentProcessTransport } from "../rpc/child-process-transport";
@@ -25,6 +26,7 @@ import type {
   CompletionParams,
   ChatParams,
   TokenUsage,
+  ToolDefinition,
 } from "./types.js";
 
 // Single shared Llama instances
@@ -187,6 +189,39 @@ function mapParameters(params: CompletionParams | ChatParams, model: any) {
   }
 
   return llamaParams;
+}
+
+/**
+ * Convert OpenAI tool definitions to node-llama-cpp function format
+ */
+function toolsToFunctions(
+  tools: ToolDefinition[] | undefined
+): Record<string, any> | undefined {
+  if (!tools || tools.length === 0) {
+    return undefined;
+  }
+
+  const functions: Record<string, any> = {};
+
+  for (const tool of tools) {
+    if (tool.type === "function") {
+      const func = tool.function;
+      functions[func.name] = defineChatSessionFunction({
+        description: func.description || "",
+        params: func.parameters,
+        // Handler will be called by node-llama-cpp when the model requests this function
+        // The result is automatically added to the chat history
+        async handler(params: any) {
+          // Return the params as a string representation
+          // The actual function execution happens in the parent process
+          // This is a placeholder - the parent handles the real execution
+          return JSON.stringify(params);
+        },
+      });
+    }
+  }
+
+  return functions;
 }
 
 /**
@@ -411,8 +446,13 @@ const functions: InferenceProcessFunctions = {
       const promptText = lastUserMessage ? lastUserMessage.content : "";
 
       // Streaming mode: send chunks as they arrive
+
+      // Convert tools to node-llama-cpp function format
+      const functions = toolsToFunctions(params.tools);
+
       await currentSession.prompt(promptText, {
         ...llamaParams,
+        functions,
         seed: Math.floor(Math.random() * 1_000_000),
         onResponseChunk: (chunk: LlamaChatResponseChunk) => {
           // Track tokens
