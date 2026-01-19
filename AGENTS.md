@@ -55,15 +55,6 @@ Agents identify themselves via HTTP headers during WebSocket upgrade:
 
 If two agents of the same ID connect the controller, it should kick out the older agent and accept the newer one.
 
-## Message Format
-
-```jsonc
-// Request: { "type": "req", "proc": "completion", "req": "uuid", "params": {...} }
-// Response: { "type": "res", "req": "uuid", "result": {...} }
-// Error: { "type": "error", "req": "uuid", "error": {"code": "...", "message": "..."} }
-// Event: { "type": "event", "event": "event.name", "req": "uuid", "data": {...} }
-```
-
 ## Flows
 
 ### agent flow
