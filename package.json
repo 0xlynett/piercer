@@ -21,7 +21,8 @@
     "controller": "bun ./controller",
     "cli": "bun run ./cli/src/index.tsx",
     "harness:create-dirs": "bun harness/create-agent-dirs.ts",
-    "harness:run": "bun harness/run-agents.ts"
+    "harness:run": "bun harness/run-agents.ts",
+    "sync": "bun ./sync/index.ts"
   },
   "dependencies": {
     "tsx": "^4.21.0"
