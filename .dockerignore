@@ -1,0 +1,43 @@
+# Dependencies
+node_modules
+.bun
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Data directories
+agent-data/
+data/
+models/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+.DS_Store
+
+# Logs
+logs
+*.log
+
+# Build artifacts
+dist
+out
+*.tsbuildinfo
+coverage
+
+# Testing
+.cache
+
+# Development
+.devcontainer
